@@ -1,0 +1,38 @@
+{
+	"name": "better-t-stack",
+	"private": true,
+	"scripts": {
+		"build": "turbo build",
+		"dev": "turbo dev",
+		"dev:cli": "turbo run dev --filter=create-better-t-stack",
+		"cli": "cd apps/cli && node dist/index.js",
+		"dev:web": "turbo run dev --filter=web",
+		"build:web": "turbo run build --filter=web",
+		"build:cli": "turbo run build --filter=create-better-t-stack",
+		"check": "turbo check",
+		"format": "biome check --write .",
+		"publish-packages": "turbo run build --filter=create-better-t-stack && changeset publish",
+		"deploy:web": "bun run --filter=web generate-analytics && bun run --filter=web generate-schema && turbo run --filter=web deploy"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.1.2",
+		"@changesets/cli": "^2.29.5",
+		"husky": "^9.1.7",
+		"lint-staged": "^16.1.2",
+		"turbo": "^2.5.5",
+		"typescript": "5.8.3"
+	},
+	"lint-staged": {
+		"*": [
+			"bun biome check --write ."
+		]
+	},
+	"engines": {
+		"node": ">=20"
+	},
+	"packageManager": "bun@1.2.16",
+	"workspaces": [
+		"apps/*",
+		"packages/*"
+	]
+}

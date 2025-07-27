@@ -1,0 +1,76 @@
+{
+  "name": "create-better-t-stack",
+  "version": "2.27.1",
+  "description": "A modern CLI tool for scaffolding end-to-end type-safe TypeScript projects with best practices and customizable configurations",
+  "type": "module",
+  "license": "MIT",
+  "author": "Aman Varshney",
+  "bin": {
+    "create-better-t-stack": "dist/index.js"
+  },
+  "files": [
+    "templates",
+    "dist"
+  ],
+  "keywords": [
+    "better-t-stack",
+    "typescript",
+    "boilerplate",
+    "starter",
+    "cli",
+    "turborepo",
+    "trpc",
+    "better-auth",
+    "monorepo",
+    "fullstack",
+    "type-safety",
+    "react",
+    "react-native",
+    "expo",
+    "hono",
+    "elysia",
+    "drizzle",
+    "prisma",
+    "tanstack",
+    "tailwind",
+    "shadcn",
+    "pwa",
+    "tauri",
+    "biome"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AmanVarshney01/create-better-t-stack.git",
+    "directory": "apps/cli"
+  },
+  "homepage": "https://better-t-stack.dev/",
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "check-types": "tsc --noEmit",
+    "check": "biome check --write .",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.11.0",
+    "consola": "^3.4.2",
+    "execa": "^9.6.0",
+    "fs-extra": "^11.3.0",
+    "globby": "^14.1.0",
+    "gradient-string": "^3.0.0",
+    "handlebars": "^4.7.8",
+    "jsonc-parser": "^3.3.1",
+    "picocolors": "^1.1.1",
+    "posthog-node": "^5.5.0",
+    "trpc-cli": "^0.10.0",
+    "ts-morph": "^26.0.0",
+    "zod": "^4.0.5"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "^24.0.13",
+    "tsdown": "^0.12.9",
+    "typescript": "^5.8.3"
+  }
+}
