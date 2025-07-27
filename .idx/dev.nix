@@ -5,6 +5,7 @@
     pkgs.gcc
     pkgs.bun
     pkgs.tree
+    pkgs.gnumake
   ];
   env = { };
   idx = {
