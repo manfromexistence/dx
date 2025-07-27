@@ -1,5 +1,6 @@
 # Inspirations
 ```
+git clone https://github.com/torvalds/linux && cd linux && rm -rf .git && cd ..
 git clone https://github.com/git/git.git && cd git && rm -rf .git && cd ..
 git clone https://github.com/biomejs/biome && cd biome && rm -rf .git && cd ..
 git clone https://github.com/latipun7/charasay && cd charasay && rm -rf .git && cd ..
