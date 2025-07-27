@@ -4,6 +4,7 @@
     pkgs.rustup
     pkgs.gcc
     pkgs.bun
+    pkgs.tree
   ];
   env = { };
   idx = {
