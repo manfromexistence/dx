@@ -1,0 +1,39 @@
+{
+  "mode": "pre",
+  "tag": "alpha",
+  "initialVersions": {
+    "@example/basic": "0.0.0",
+    "@example/changesets": "0.0.0",
+    "@clack/core": "0.4.1",
+    "@clack/prompts": "0.10.0"
+  },
+  "changesets": [
+    "afraid-socks-deny",
+    "bright-hornets-destroy",
+    "calm-trains-camp",
+    "curvy-seals-sit",
+    "dirty-papayas-happen",
+    "empty-buses-wonder",
+    "famous-turkeys-burn",
+    "five-chairs-poke",
+    "free-wasps-decide",
+    "happy-parents-explain",
+    "healthy-candles-admire",
+    "honest-singers-cough",
+    "hot-turkeys-knock",
+    "legal-bags-tie",
+    "lemon-monkeys-help",
+    "mean-mice-train",
+    "mean-turkeys-help",
+    "mean-years-remain",
+    "moody-baboons-greet",
+    "nasty-parrots-laugh",
+    "orange-deers-battle",
+    "short-taxis-cross",
+    "slimy-roses-own",
+    "strong-ravens-greet",
+    "sweet-deers-smell",
+    "tall-cows-fold",
+    "thin-socks-travel"
+  ]
+}
