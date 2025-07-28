@@ -5,5 +5,5 @@
 mod header;
 
 fn main() {
-    header::render("Better Tell me to go!");
+    header::render("I really wanna know - what do you mean!");
 }
