@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -68,7 +69,7 @@ pub struct DXCliFont {
 }
 
 pub struct Figure<'a> {
-    character_lines: Vec<Vec<&'a parser::DXCliFontCharacter>>,
+    character_lines: Vec<Vec<Cow<'a, parser::DXCliFontCharacter>>>,
     height: u32,
     alignment: Alignment,
 }
@@ -92,28 +93,48 @@ impl DXCliFont {
             return None;
         }
 
+        let height = self.header.height as usize;
+        let width = 5;
+        let mut linker_art = Vec::with_capacity(height);
+        for i in 0..height {
+            linker_art.push(match i {
+                i if i == height / 2 => "—o—".to_string(),
+                _ => "  |  ".to_string(),
+            });
+        }
+        let linker_char = parser::DXCliFontCharacter {
+            characters: linker_art,
+            width,
+        };
+        let owned_linker: Cow<'a, parser::DXCliFontCharacter> = Cow::Owned(linker_char);
+
         let terminal_width = term_size::dimensions().map(|(w, _)| w).unwrap_or(80);
-        let mut character_lines: Vec<Vec<&'a parser::DXCliFontCharacter>> = Vec::new();
-        let mut current_line: Vec<&'a parser::DXCliFontCharacter> = Vec::new();
+        let mut character_lines: Vec<Vec<Cow<'a, parser::DXCliFontCharacter>>> = Vec::new();
+        let mut current_line: Vec<Cow<'a, parser::DXCliFontCharacter>> = Vec::new();
         let mut current_width = 0;
 
         for word in message.split_whitespace() {
             let word_chars: Vec<_> = word
                 .chars()
                 .filter_map(|ch| self.fonts.get(&(ch as u32)))
+                .map(Cow::Borrowed)
                 .collect();
 
-            let word_width: usize = word_chars.iter().map(|c| c.width).sum();
-            let space_width = self.fonts.get(&32).map_or(1, |c| c.width);
+            if word_chars.is_empty() {
+                continue;
+            }
 
-            if !current_line.is_empty() && current_width + space_width + word_width > terminal_width {
+            let word_width: usize = word_chars.iter().map(|c| c.width).sum();
+
+            if !current_line.is_empty() && current_width + owned_linker.width + word_width > terminal_width {
                 character_lines.push(current_line);
                 current_line = Vec::new();
                 current_width = 0;
             }
 
             if !current_line.is_empty() {
-                current_width += space_width;
+                current_line.push(owned_linker.clone());
+                current_width += owned_linker.width;
             }
 
             current_line.extend(word_chars);
@@ -148,7 +169,9 @@ impl<'a> fmt::Display for Figure<'a> {
         let terminal_width = term_size::dimensions().map(|(w, _)| w).unwrap_or(80);
 
         for (line_idx, line_of_chars) in self.character_lines.iter().enumerate() {
-            if line_of_chars.is_empty() { continue; }
+            if line_of_chars.is_empty() {
+                continue;
+            }
 
             let total_line_width: usize = line_of_chars.iter().map(|c| c.width).sum();
             let padding = match self.alignment {
