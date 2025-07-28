@@ -1,28 +1,3 @@
-//! you can visit [`figlet`] and [`figfont`] to find more details.
-//! you can visit [`fongdb`] to find more font.
-//!
-//! # Examples
-//!
-//! download [`small.flf`] and place it to the `resources` folder.
-//!
-//! convert string literal using standard or specified font:
-//!
-//! ```
-//! use figlet_rs::FIGfont;
-//!
-//! let standard_font = FIGfont::standard().unwrap();
-//! let figure = standard_font.convert("FIGlet");
-//! assert!(figure.is_some());
-//!
-//! let small_font = FIGfont::from_file("resources/small.flf").unwrap();
-//! let figure = small_font.convert("FIGlet");
-//! assert!(figure.is_some());
-//! ```
-//! [`figlet`]: http://www.figlet.org
-//! [`figfont`]: http://www.jave.de/figlet/figfont.html
-//! [`fongdb`]: http://www.figlet.org/fontdb.cgi
-//! [`small.flf`]: http://www.figlet.org/fonts/small.flf
-
 use std::collections::HashMap;
 use std::{fmt, fs};
 
