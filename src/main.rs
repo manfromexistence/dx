@@ -6,7 +6,7 @@ mod header;
 
 fn main() {
     println!("--- Default Render (Left Aligned) ---");
-    header::render("DX fsafsfsdaf f dffsaf f sfsd fsf");
+    header::render("What do you mean? I really wanna know! What do you mean!!");
 
     println!("\n--- Customized Render (Centered) ---");
     let font = header::DXCliFont::default().expect("Failed to load the default font.");
