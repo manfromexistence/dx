@@ -1,301 +1,329 @@
 use std::collections::HashMap;
+use std::error::Error;
 use std::fmt;
+use std::fs;
+use std::io;
+use std::num::ParseIntError;
+use std::path::Path;
+use term_size;
 
-pub fn render(message: &str) {
-    let _ = try_render(message);
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum Alignment {
+    #[default]
+    Left,
+    Center,
+    Right,
 }
 
-pub fn try_render(message: &str) -> Result<(), String> {
-    let font = DXCliFont::default()?;
-    if let Some(figure) = font.convert(message) {
-        println!("{}", figure);
+pub fn render(message: &str) {
+    match DXCliFont::default() {
+        Ok(font) => {
+            if let Some(figure) = font.figure(message) {
+                println!("{}", figure);
+            }
+        }
+        Err(e) => eprintln!("Font rendering error: {}", e),
     }
-    Ok(())
+}
+
+#[derive(Debug)]
+pub enum FontError {
+    Io(io::Error),
+    Parse(String),
+}
+
+impl fmt::Display for FontError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FontError::Io(e) => write!(f, "I/O error: {}", e),
+            FontError::Parse(msg) => write!(f, "Font parsing error: {}", msg),
+        }
+    }
+}
+
+impl Error for FontError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            FontError::Io(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<io::Error> for FontError {
+    fn from(err: io::Error) -> Self {
+        FontError::Io(err)
+    }
+}
+
+impl From<ParseIntError> for FontError {
+    fn from(err: ParseIntError) -> Self {
+        FontError::Parse(err.to_string())
+    }
 }
 
 pub struct DXCliFont {
-    pub header_line: HeaderLine,
-    pub fonts: HashMap<u32, DXCliFontCharacter>,
+    pub header: parser::HeaderLine,
+    pub fonts: HashMap<u32, parser::DXCliFontCharacter>,
+}
+
+pub struct Figure<'a> {
+    character_lines: Vec<Vec<&'a parser::DXCliFontCharacter>>,
+    height: u32,
+    alignment: Alignment,
 }
 
 impl DXCliFont {
-    fn read_header_line(header_line: &str) -> Result<HeaderLine, String> {
-        HeaderLine::try_from(header_line)
-    }
-
-    fn extract_one_line(
-        lines: &[&str],
-        index: usize,
-        height: usize,
-        hardblank: char,
-        is_last_index: bool,
-    ) -> Result<String, String> {
-        let line = lines
-            .get(index)
-            .ok_or(format!("can't get line at specified index:{index}"))?;
-
-        let mut width = line.len() - 1;
-        if is_last_index && height != 1 {
-            width -= 1;
-        }
-
-        Ok(line[..width].replace(hardblank, " "))
-    }
-
-    fn extract_one_font(
-        lines: &[&str],
-        start_index: usize,
-        height: usize,
-        hardblank: char,
-    ) -> Result<DXCliFontCharacter, String> {
-        let mut characters = vec![];
-        for i in 0..height {
-            let index = start_index + i;
-            let is_last_index = i == height - 1;
-            let one_line_character =
-                DXCliFont::extract_one_line(lines, index, height, hardblank, is_last_index)?;
-            characters.push(one_line_character);
-        }
-
-        Ok(DXCliFontCharacter { characters })
-    }
-
-    fn read_required_font(
-        lines: &[&str],
-        headerline: &HeaderLine,
-        map: &mut HashMap<u32, DXCliFontCharacter>,
-    ) -> Result<(), String> {
-        let offset = (1 + headerline.comment_lines) as usize;
-        let height = headerline.height as usize;
-        let size = lines.len();
-
-        for i in 0..=94 {
-            let code = (i + 32) as u32;
-            let start_index = offset + i * height;
-            if start_index >= size {
-                break;
-            }
-
-            let font =
-                DXCliFont::extract_one_font(lines, start_index, height, headerline.hardblank)?;
-            map.insert(code, font);
-        }
-
-        let offset = offset + 95 * height;
-        let required_deutsch_characters_codes: [u32; 7] = [196, 214, 220, 228, 246, 252, 223];
-        for (i, code) in required_deutsch_characters_codes.iter().enumerate() {
-            let start_index = offset + i * height;
-            if start_index >= size {
-                break;
-            }
-
-            let font =
-                DXCliFont::extract_one_font(lines, start_index, height, headerline.hardblank)?;
-            map.insert(*code, font);
-        }
-
-        Ok(())
-    }
-
-    fn extract_codetag_font_code(lines: &[&str], index: usize) -> Result<u32, String> {
-        let line = lines
-            .get(index)
-            .ok_or_else(|| "get codetag line error".to_string())?;
-
-        let infos: Vec<&str> = line.trim().split(' ').collect();
-        if infos.is_empty() {
-            return Err("extract code for codetag font error".to_string());
-        }
-
-        let code = infos[0].trim();
-
-        let code = if let Some(s) = code.strip_prefix("0x") {
-            u32::from_str_radix(s, 16)
-        } else if let Some(s) = code.strip_prefix("0X") {
-            u32::from_str_radix(s, 16)
-        } else if let Some(s) = code.strip_prefix('0') {
-            u32::from_str_radix(s, 8)
-        } else {
-            code.parse()
-        };
-
-        code.map_err(|e| format!("{e:?}"))
-    }
-
-    fn read_codetag_font(
-        lines: &[&str],
-        headerline: &HeaderLine,
-        map: &mut HashMap<u32, DXCliFontCharacter>,
-    ) -> Result<(), String> {
-        let offset = (1 + headerline.comment_lines + 102 * headerline.height) as usize;
-        let codetag_height = (headerline.height + 1) as usize;
-        let codetag_lines = lines.len() - offset;
-
-        if codetag_lines % codetag_height != 0 {
-            return Err("codetag font is illegal.".to_string());
-        }
-
-        let size = codetag_lines / codetag_height;
-
-        for i in 0..size {
-            let start_index = offset + i * codetag_height;
-            if start_index >= lines.len() {
-                break;
-            }
-
-            let code = DXCliFont::extract_codetag_font_code(lines, start_index)?;
-            let font = DXCliFont::extract_one_font(
-                lines,
-                start_index + 1,
-                headerline.height as usize,
-                headerline.hardblank,
-            )?;
-            map.insert(code, font);
-        }
-
-        Ok(())
-    }
-
-    fn read_fonts(
-        lines: &[&str],
-        headerline: &HeaderLine,
-    ) -> Result<HashMap<u32, DXCliFontCharacter>, String> {
-        let mut map = HashMap::new();
-        DXCliFont::read_required_font(lines, headerline, &mut map)?;
-        DXCliFont::read_codetag_font(lines, headerline, &mut map)?;
-        Ok(map)
-    }
-
-    pub fn from_content(contents: &str) -> Result<DXCliFont, String> {
-        let lines: Vec<&str> = contents.lines().collect();
-
-        if lines.is_empty() {
-            return Err("can not generate DX-CLI-Font from empty string".to_string());
-        }
-
-        let header_line = DXCliFont::read_header_line(lines.first().unwrap())?;
-        let fonts = DXCliFont::read_fonts(&lines, &header_line)?;
-
-        Ok(DXCliFont { header_line, fonts })
-    }
-
-    pub fn default() -> Result<DXCliFont, String> {
+    #[must_use]
+    pub fn default() -> Result<Self, FontError> {
         let contents = std::include_str!("default.dxcf");
-        DXCliFont::from_content(contents)
+        parser::parse_font(contents)
     }
 
-    pub fn convert(&self, message: &str) -> Option<DXCliFigure> {
+    #[must_use]
+    #[allow(dead_code)]
+    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, FontError> {
+        let contents = fs::read_to_string(path)?;
+        parser::parse_font(&contents)
+    }
+
+    pub fn figure<'a>(&'a self, message: &str) -> Option<Figure<'a>> {
         if message.is_empty() {
             return None;
         }
 
-        let mut characters: Vec<&DXCliFontCharacter> = vec![];
-        for ch in message.chars() {
-            let code = ch as u32;
-            if let Some(character) = self.fonts.get(&code) {
-                characters.push(character);
+        let terminal_width = term_size::dimensions().map(|(w, _)| w).unwrap_or(80);
+        let mut character_lines: Vec<Vec<&'a parser::DXCliFontCharacter>> = Vec::new();
+        let mut current_line: Vec<&'a parser::DXCliFontCharacter> = Vec::new();
+        let mut current_width = 0;
+
+        for word in message.split_whitespace() {
+            let word_chars: Vec<_> = word
+                .chars()
+                .filter_map(|ch| self.fonts.get(&(ch as u32)))
+                .collect();
+
+            let word_width: usize = word_chars.iter().map(|c| c.width).sum();
+            let space_width = self.fonts.get(&32).map_or(1, |c| c.width);
+
+            if !current_line.is_empty() && current_width + space_width + word_width > terminal_width {
+                character_lines.push(current_line);
+                current_line = Vec::new();
+                current_width = 0;
             }
+
+            if !current_line.is_empty() {
+                current_width += space_width;
+            }
+
+            current_line.extend(word_chars);
+            current_width += word_width;
         }
 
-        if characters.is_empty() {
-            return None;
+        if !current_line.is_empty() {
+            character_lines.push(current_line);
         }
 
-        Some(DXCliFigure {
-            characters,
-            height: self.header_line.height as u32,
-        })
+        if character_lines.is_empty() {
+            None
+        } else {
+            Some(Figure {
+                character_lines,
+                height: self.header.height,
+                alignment: Alignment::default(),
+            })
+        }
     }
 }
 
-pub struct HeaderLine {
-    pub hardblank: char,
-    pub height: i32,
-    pub comment_lines: i32,
-}
-
-impl HeaderLine {
-    fn extract_required_info(infos: &[&str], index: usize, field: &str) -> Result<i32, String> {
-        let val = match infos.get(index) {
-            Some(val) => Ok(val),
-            None => Err(format!(
-                "can't get field:{field} index:{index} from {}",
-                infos.join(",")
-            )),
-        }?;
-
-        val.parse()
-            .map_err(|_| format!("can't parse required field:{field} of {val} to i32"))
+impl<'a> Figure<'a> {
+    pub fn align(mut self, alignment: Alignment) -> Self {
+        self.alignment = alignment;
+        self
     }
 }
 
-impl TryFrom<&str> for HeaderLine {
-    type Error = String;
-
-    fn try_from(header_line: &str) -> Result<Self, Self::Error> {
-        let infos: Vec<&str> = header_line.trim().split(' ').collect();
-
-        if infos.len() < 6 {
-            return Err("headerline is illegal".to_string());
-        }
-
-        let signature_with_hardblank = infos
-            .first()
-            .ok_or("Can't get signature from header".to_string())?;
-
-        let hardblank = signature_with_hardblank
-            .chars()
-            .last()
-            .ok_or("Can't get hardblank from header".to_string())?;
-
-        let height = HeaderLine::extract_required_info(&infos, 1, "height")?;
-        let comment_lines = HeaderLine::extract_required_info(&infos, 5, "comment lines")?;
-
-        Ok(HeaderLine {
-            hardblank,
-            height,
-            comment_lines,
-        })
-    }
-}
-
-pub struct DXCliFontCharacter {
-    pub characters: Vec<String>,
-}
-
-impl fmt::Display for DXCliFontCharacter {
+impl<'a> fmt::Display for Figure<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.characters.join("\n"))
-    }
-}
+        let terminal_width = term_size::dimensions().map(|(w, _)| w).unwrap_or(80);
 
-pub struct DXCliFigure<'a> {
-    pub characters: Vec<&'a DXCliFontCharacter>,
-    pub height: u32,
-}
+        for (line_idx, line_of_chars) in self.character_lines.iter().enumerate() {
+            if line_of_chars.is_empty() { continue; }
 
-impl<'a> DXCliFigure<'a> {
-    fn is_not_empty(&self) -> bool {
-        !self.characters.is_empty() && self.height > 0
-    }
-}
+            let total_line_width: usize = line_of_chars.iter().map(|c| c.width).sum();
+            let padding = match self.alignment {
+                Alignment::Left => 0,
+                Alignment::Center => (terminal_width.saturating_sub(total_line_width)) / 2,
+                Alignment::Right => terminal_width.saturating_sub(total_line_width),
+            };
+            let padding_str = " ".repeat(padding);
 
-impl<'a> fmt::Display for DXCliFigure<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.is_not_empty() {
-            let mut rs: Vec<&'a str> = vec![];
-            for i in 0..self.height {
-                for character in &self.characters {
-                    if let Some(line) = character.characters.get(i as usize) {
-                        rs.push(line);
+            for i in 0..self.height as usize {
+                write!(f, "{}", padding_str)?;
+                for character in line_of_chars {
+                    if let Some(line) = character.characters.get(i) {
+                        write!(f, "{}", line)?;
                     }
                 }
-                rs.push("\n");
+                if i < self.height as usize - 1 {
+                    writeln!(f)?;
+                }
             }
 
-            write!(f, "{}", rs.join(""))
+            if line_idx < self.character_lines.len() - 1 {
+                writeln!(f)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+mod parser {
+    use super::{DXCliFont, FontError};
+    use std::collections::HashMap;
+    use std::ops::Range;
+
+    #[derive(Clone, Copy)]
+    pub struct HeaderLine {
+        pub hardblank: char,
+        pub height: u32,
+        pub comment_lines: u32,
+    }
+
+    #[derive(Clone)]
+    pub struct DXCliFontCharacter {
+        pub characters: Vec<String>,
+        pub width: usize,
+    }
+
+    pub(super) fn parse_font(contents: &str) -> Result<DXCliFont, FontError> {
+        let lines: Vec<&str> = contents.lines().collect();
+        if lines.is_empty() {
+            return Err(FontError::Parse("Cannot parse an empty file.".to_string()));
+        }
+        let header = HeaderLine::try_from(lines[0])?;
+        let fonts = read_fonts(&lines, header)?;
+        Ok(DXCliFont { header, fonts })
+    }
+
+    impl TryFrom<&str> for HeaderLine {
+        type Error = FontError;
+        fn try_from(header_line: &str) -> Result<Self, Self::Error> {
+            let parts: Vec<&str> = header_line.split_whitespace().collect();
+            if parts.len() < 6 {
+                return Err(FontError::Parse("Header must have at least 6 parts.".to_string()));
+            }
+            let signature = parts[0];
+            let hardblank = signature.chars().last().ok_or_else(|| FontError::Parse("Signature is missing hardblank character.".to_string()))?;
+            let height: u32 = parts.get(1).ok_or(FontError::Parse("Missing height.".to_string()))?.parse()?;
+            let comment_lines: u32 = parts.get(5).ok_or(FontError::Parse("Missing comment line count.".to_string()))?.parse()?;
+            Ok(HeaderLine { hardblank, height, comment_lines })
+        }
+    }
+
+    fn read_fonts(lines: &[&str], header: HeaderLine) -> Result<HashMap<u32, DXCliFontCharacter>, FontError> {
+        let mut map = HashMap::new();
+        let (standard_range, codetag_range) = split_font_sections(lines, header)?;
+
+        read_standard_fonts(&lines[standard_range], header, &mut map)?;
+        read_codetag_fonts(&lines[codetag_range], header, &mut map)?;
+
+        Ok(map)
+    }
+
+    fn split_font_sections(lines: &[&str], header: HeaderLine) -> Result<(Range<usize>, Range<usize>), FontError> {
+        const ASCII_CHAR_COUNT: usize = 95;
+        const GERMAN_CHAR_COUNT: usize = 7;
+        const TOTAL_STANDARD_CHARS: usize = ASCII_CHAR_COUNT + GERMAN_CHAR_COUNT;
+
+        let height = header.height as usize;
+        let comment_offset = 1 + header.comment_lines as usize;
+        let standard_char_line_count = TOTAL_STANDARD_CHARS * height;
+
+        let standard_end = comment_offset + standard_char_line_count;
+        if lines.len() < standard_end {
+            return Err(FontError::Parse("File is too short to contain standard characters.".to_string()));
+        }
+
+        let standard_range = comment_offset..standard_end;
+        let codetag_range = standard_end..lines.len();
+
+        Ok((standard_range, codetag_range))
+    }
+
+    fn read_standard_fonts(lines: &[&str], header: HeaderLine, map: &mut HashMap<u32, DXCliFontCharacter>) -> Result<(), FontError> {
+        let height = header.height as usize;
+        let (ascii_lines, german_lines) = lines.split_at(95 * height);
+
+        for (i, chunk) in ascii_lines.chunks_exact(height).enumerate() {
+            let code = (i + 32) as u32;
+            let font = extract_one_font(chunk, header)?;
+            map.insert(code, font);
+        }
+
+        let required_deutsch_codes: [u32; 7] = [196, 214, 220, 228, 246, 252, 223];
+        for (i, chunk) in german_lines.chunks_exact(height).enumerate() {
+            let code = required_deutsch_codes[i];
+            let font = extract_one_font(chunk, header)?;
+            map.insert(code, font);
+        }
+        Ok(())
+    }
+
+    fn read_codetag_fonts(lines: &[&str], header: HeaderLine, map: &mut HashMap<u32, DXCliFontCharacter>) -> Result<(), FontError> {
+        let codetag_block_height = header.height as usize + 1;
+        if !lines.is_empty() && lines.len() % codetag_block_height != 0 {
+            return Err(FontError::Parse("Codetag font data is incomplete or corrupted.".to_string()));
+        }
+
+        for chunk in lines.chunks_exact(codetag_block_height) {
+            let code = extract_codetag_font_code(chunk[0])?;
+            let font = extract_one_font(&chunk[1..], header)?;
+            map.insert(code, font);
+        }
+        Ok(())
+    }
+
+    fn extract_one_font(lines: &[&str], header: HeaderLine) -> Result<DXCliFontCharacter, FontError> {
+        let height = header.height as usize;
+        if lines.len() < height {
+            return Err(FontError::Parse("Font character definition is shorter than header height.".to_string()));
+        }
+        let mut characters = Vec::with_capacity(height);
+        let mut width = 0;
+        for i in 0..height {
+            let is_last_line = i == height - 1;
+            let one_line = trim_and_replace(lines[i], header.height, header.hardblank, is_last_line);
+            if i == 0 {
+                width = one_line.chars().count();
+            }
+            characters.push(one_line);
+        }
+        Ok(DXCliFontCharacter { characters, width })
+    }
+
+    fn trim_and_replace(line: &str, height: u32, hardblank: char, is_last_line: bool) -> String {
+        let end_marker = '@';
+        let mut stripped = line;
+        if let Some(s) = stripped.strip_suffix(end_marker) {
+            stripped = s;
+            if is_last_line && height > 1 {
+                if let Some(s2) = stripped.strip_suffix(end_marker) {
+                    stripped = s2;
+                }
+            }
+        }
+        stripped.chars().map(|c| if c == hardblank { ' ' } else { c }).collect()
+    }
+
+    fn extract_codetag_font_code(line: &str) -> Result<u32, FontError> {
+        let code_str = line.split_whitespace().next().ok_or_else(|| FontError::Parse("Codetag line is empty.".to_string()))?;
+        if let Some(hex_val) = code_str.strip_prefix("0x").or_else(|| code_str.strip_prefix("0X")) {
+            u32::from_str_radix(hex_val, 16).map_err(Into::into)
+        } else if let Some(oct_val) = code_str.strip_prefix('0') {
+            u32::from_str_radix(oct_val, 8).map_err(Into::into)
         } else {
-            write!(f, "")
+            code_str.parse().map_err(Into::into)
         }
     }
 }
