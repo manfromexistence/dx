@@ -3,17 +3,7 @@
 // }
 
 mod header;
-use header::DXCliFont;
 
 fn main() {
-    match DXCliFont::default() {
-        Ok(font) => {
-            if let Some(figure) = font.convert("dx") {
-                println!("{}", figure);
-            }
-        }
-        Err(e) => {
-            eprintln!("Error loading font: {}", e);
-        }
-    }
+    header::render("Better Tell me to go!");
 }

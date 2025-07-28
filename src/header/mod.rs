@@ -1,6 +1,21 @@
 use std::collections::HashMap;
 use std::fmt;
 
+// The new, simple render function. It wraps all the logic.
+pub fn render(message: &str) {
+    // This calls the internal try_render function and ignores any errors.
+    let _ = try_render(message);
+}
+
+// This is the old render function, renamed in case you need it.
+pub fn try_render(message: &str) -> Result<(), String> {
+    let font = DXCliFont::default()?;
+    if let Some(figure) = font.convert(message) {
+        println!("{}", figure);
+    }
+    Ok(())
+}
+
 pub struct DXCliFont {
     pub header_line: HeaderLine,
     pub fonts: HashMap<u32, DXCliFontCharacter>,
