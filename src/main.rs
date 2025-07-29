@@ -1,14 +1,10 @@
-// fn main(){
-//     println!("Hello, manfromexistence!")
-// }
-
 mod header;
 mod platform;
 pub use crate::platform::{dimensions, dimensions_stderr, dimensions_stdin, dimensions_stdout};
 
 fn main() {
     println!("--- Default Render (Left Aligned) ---");
-    header::render("What do you mean? I really wanna know! What do you mean!!");
+    header::render("Hello, how are you?");
 
     println!("\n--- Customized Render (Centered) ---");
     let font = header::DXCliFont::default().expect("Failed to load the default font.");
