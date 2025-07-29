@@ -1,0 +1,58 @@
+[package]
+name = "term_size"
+version = "1.0.0-beta.2"
+authors = ["Kevin K. <kbknapp@gmail.com>", "Benjamin Sago <ogham@bsago.me>"]
+edition = "2018"
+exclude = ["/.clog.toml", "/.travis.yml", "/appveyor.yml", "/index.html", "/justfile"]
+description = "functions for determining terminal sizes and dimensions"
+repository = "https://github.com/kbknapp/term_size-rs.git"
+documentation = "https://docs.rs/term_size/"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+keywords = ["term", "terminal", "size", "width", "dimension"]
+categories = ["command-line-interface"]
+
+[badges]
+travis-ci = {repository = "kbknapp/term_size-rs"}
+appveyor = {repository = "kbknapp/term_size-rs"}
+
+[dependencies]
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+libc = "0.2.20"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winapi = { version = "0.3", features = ["wincon", "processenv", "winbase"] }
+
+[features]
+default     = []
+
+[profile.release]
+opt-level = 3
+debug = false
+rpath = false
+lto = true
+debug-assertions = false
+# codegen-units ignored with lto=true
+
+[profile.dev]
+opt-level = 0
+debug = true
+rpath = false
+lto = false
+debug-assertions = true
+codegen-units = 4
+
+[profile.test]
+opt-level = 1
+debug = true
+rpath = false
+lto = false
+debug-assertions = true
+codegen-units = 2
+
+[profile.bench]
+opt-level = 3
+debug = false
+rpath = false
+lto = true
+debug-assertions = false

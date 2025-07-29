@@ -3,6 +3,8 @@
 // }
 
 mod header;
+mod platform;
+pub use crate::platform::{dimensions, dimensions_stderr, dimensions_stdin, dimensions_stdout};
 
 fn main() {
     println!("--- Default Render (Left Aligned) ---");

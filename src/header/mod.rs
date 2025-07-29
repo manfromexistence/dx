@@ -1,3 +1,4 @@
+use crate::platform;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::error::Error;
@@ -6,7 +7,6 @@ use std::fs;
 use std::io;
 use std::num::ParseIntError;
 use std::path::Path;
-use term_size;
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum Alignment {
@@ -108,7 +108,7 @@ impl DXCliFont {
         };
         let owned_linker: Cow<'a, parser::DXCliFontCharacter> = Cow::Owned(linker_char);
 
-        let terminal_width = term_size::dimensions().map(|(w, _)| w).unwrap_or(80);
+        let terminal_width = platform::dimensions().map(|(w, _)| w).unwrap_or(80);
         let mut character_lines: Vec<Vec<Cow<'a, parser::DXCliFontCharacter>>> = Vec::new();
         let mut current_line: Vec<Cow<'a, parser::DXCliFontCharacter>> = Vec::new();
         let mut current_width = 0;
@@ -126,7 +126,9 @@ impl DXCliFont {
 
             let word_width: usize = word_chars.iter().map(|c| c.width).sum();
 
-            if !current_line.is_empty() && current_width + owned_linker.width + word_width > terminal_width {
+            if !current_line.is_empty()
+                && current_width + owned_linker.width + word_width > terminal_width
+            {
                 character_lines.push(current_line);
                 current_line = Vec::new();
                 current_width = 0;
@@ -166,7 +168,7 @@ impl<'a> Figure<'a> {
 
 impl<'a> fmt::Display for Figure<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let terminal_width = term_size::dimensions().map(|(w, _)| w).unwrap_or(80);
+        let terminal_width = platform::dimensions().map(|(w, _)| w).unwrap_or(80);
 
         for (line_idx, line_of_chars) in self.character_lines.iter().enumerate() {
             if line_of_chars.is_empty() {
@@ -234,17 +236,34 @@ mod parser {
         fn try_from(header_line: &str) -> Result<Self, Self::Error> {
             let parts: Vec<&str> = header_line.split_whitespace().collect();
             if parts.len() < 6 {
-                return Err(FontError::Parse("Header must have at least 6 parts.".to_string()));
+                return Err(FontError::Parse(
+                    "Header must have at least 6 parts.".to_string(),
+                ));
             }
             let signature = parts[0];
-            let hardblank = signature.chars().last().ok_or_else(|| FontError::Parse("Signature is missing hardblank character.".to_string()))?;
-            let height: u32 = parts.get(1).ok_or(FontError::Parse("Missing height.".to_string()))?.parse()?;
-            let comment_lines: u32 = parts.get(5).ok_or(FontError::Parse("Missing comment line count.".to_string()))?.parse()?;
-            Ok(HeaderLine { hardblank, height, comment_lines })
+            let hardblank = signature.chars().last().ok_or_else(|| {
+                FontError::Parse("Signature is missing hardblank character.".to_string())
+            })?;
+            let height: u32 = parts
+                .get(1)
+                .ok_or(FontError::Parse("Missing height.".to_string()))?
+                .parse()?;
+            let comment_lines: u32 = parts
+                .get(5)
+                .ok_or(FontError::Parse("Missing comment line count.".to_string()))?
+                .parse()?;
+            Ok(HeaderLine {
+                hardblank,
+                height,
+                comment_lines,
+            })
         }
     }
 
-    fn read_fonts(lines: &[&str], header: HeaderLine) -> Result<HashMap<u32, DXCliFontCharacter>, FontError> {
+    fn read_fonts(
+        lines: &[&str],
+        header: HeaderLine,
+    ) -> Result<HashMap<u32, DXCliFontCharacter>, FontError> {
         let mut map = HashMap::new();
         let (standard_range, codetag_range) = split_font_sections(lines, header)?;
 
@@ -254,7 +273,10 @@ mod parser {
         Ok(map)
     }
 
-    fn split_font_sections(lines: &[&str], header: HeaderLine) -> Result<(Range<usize>, Range<usize>), FontError> {
+    fn split_font_sections(
+        lines: &[&str],
+        header: HeaderLine,
+    ) -> Result<(Range<usize>, Range<usize>), FontError> {
         const ASCII_CHAR_COUNT: usize = 95;
         const GERMAN_CHAR_COUNT: usize = 7;
         const TOTAL_STANDARD_CHARS: usize = ASCII_CHAR_COUNT + GERMAN_CHAR_COUNT;
@@ -265,7 +287,9 @@ mod parser {
 
         let standard_end = comment_offset + standard_char_line_count;
         if lines.len() < standard_end {
-            return Err(FontError::Parse("File is too short to contain standard characters.".to_string()));
+            return Err(FontError::Parse(
+                "File is too short to contain standard characters.".to_string(),
+            ));
         }
 
         let standard_range = comment_offset..standard_end;
@@ -274,7 +298,11 @@ mod parser {
         Ok((standard_range, codetag_range))
     }
 
-    fn read_standard_fonts(lines: &[&str], header: HeaderLine, map: &mut HashMap<u32, DXCliFontCharacter>) -> Result<(), FontError> {
+    fn read_standard_fonts(
+        lines: &[&str],
+        header: HeaderLine,
+        map: &mut HashMap<u32, DXCliFontCharacter>,
+    ) -> Result<(), FontError> {
         let height = header.height as usize;
         let (ascii_lines, german_lines) = lines.split_at(95 * height);
 
@@ -293,10 +321,16 @@ mod parser {
         Ok(())
     }
 
-    fn read_codetag_fonts(lines: &[&str], header: HeaderLine, map: &mut HashMap<u32, DXCliFontCharacter>) -> Result<(), FontError> {
+    fn read_codetag_fonts(
+        lines: &[&str],
+        header: HeaderLine,
+        map: &mut HashMap<u32, DXCliFontCharacter>,
+    ) -> Result<(), FontError> {
         let codetag_block_height = header.height as usize + 1;
         if !lines.is_empty() && lines.len() % codetag_block_height != 0 {
-            return Err(FontError::Parse("Codetag font data is incomplete or corrupted.".to_string()));
+            return Err(FontError::Parse(
+                "Codetag font data is incomplete or corrupted.".to_string(),
+            ));
         }
 
         for chunk in lines.chunks_exact(codetag_block_height) {
@@ -307,16 +341,22 @@ mod parser {
         Ok(())
     }
 
-    fn extract_one_font(lines: &[&str], header: HeaderLine) -> Result<DXCliFontCharacter, FontError> {
+    fn extract_one_font(
+        lines: &[&str],
+        header: HeaderLine,
+    ) -> Result<DXCliFontCharacter, FontError> {
         let height = header.height as usize;
         if lines.len() < height {
-            return Err(FontError::Parse("Font character definition is shorter than header height.".to_string()));
+            return Err(FontError::Parse(
+                "Font character definition is shorter than header height.".to_string(),
+            ));
         }
         let mut characters = Vec::with_capacity(height);
         let mut width = 0;
         for i in 0..height {
             let is_last_line = i == height - 1;
-            let one_line = trim_and_replace(lines[i], header.height, header.hardblank, is_last_line);
+            let one_line =
+                trim_and_replace(lines[i], header.height, header.hardblank, is_last_line);
             if i == 0 {
                 width = one_line.chars().count();
             }
@@ -336,12 +376,21 @@ mod parser {
                 }
             }
         }
-        stripped.chars().map(|c| if c == hardblank { ' ' } else { c }).collect()
+        stripped
+            .chars()
+            .map(|c| if c == hardblank { ' ' } else { c })
+            .collect()
     }
 
     fn extract_codetag_font_code(line: &str) -> Result<u32, FontError> {
-        let code_str = line.split_whitespace().next().ok_or_else(|| FontError::Parse("Codetag line is empty.".to_string()))?;
-        if let Some(hex_val) = code_str.strip_prefix("0x").or_else(|| code_str.strip_prefix("0X")) {
+        let code_str = line
+            .split_whitespace()
+            .next()
+            .ok_or_else(|| FontError::Parse("Codetag line is empty.".to_string()))?;
+        if let Some(hex_val) = code_str
+            .strip_prefix("0x")
+            .or_else(|| code_str.strip_prefix("0X"))
+        {
             u32::from_str_radix(hex_val, 16).map_err(Into::into)
         } else if let Some(oct_val) = code_str.strip_prefix('0') {
             u32::from_str_radix(oct_val, 8).map_err(Into::into)
