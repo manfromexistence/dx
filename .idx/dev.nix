@@ -12,8 +12,9 @@
     extensions = [
       "pkief.material-icon-theme"
       "ziglang.vscode-zig"
-      "rust-lang.rust"
       "tamasfe.even-better-toml"
+      "rust-lang.rust-analyzer"
+      "eamodio.gitlens"
     ];
     workspace = {
       onCreate = {
