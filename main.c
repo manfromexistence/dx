@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -12,7 +13,7 @@
 #define NUM_THREADS 4
 #define FOLDER "modules/"
 #define CONTENT "hello world\n"
-#define MAX_AIO_EVENTS 256
+#define MAX_AIO_EVENTS 128
 
 typedef struct {
     int start;
