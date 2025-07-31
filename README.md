@@ -17,4 +17,6 @@ Remove all comments from this rust and don't change anything for now!
 ```
 gcc -O3 main.c -o main -pthread -laio -I/nix/store/6qxxs7m69vkbxzscqljck04v1m8dncc5-libaio-0.3.113/include -L/nix/store/6qxxs7m69vkbxzscqljck04v1m8dncc5-libaio-0.3.113/lib
 ./main
+
+gcc -O3 main.c -o main -pthread
 ```

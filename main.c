@@ -6,14 +6,13 @@
 #include <string.h>
 #include <time.h>
 #include <errno.h>
-#include <libaio.h>
 #include <pthread.h>
 
 #define NUM_FILES 1000
 #define NUM_THREADS 4
 #define FOLDER "modules/"
 #define CONTENT "hello world\n"
-#define MAX_AIO_EVENTS 128
+#define BATCH_SIZE 64
 
 typedef struct {
     int start;
@@ -25,53 +24,30 @@ void *create_files(void *arg) {
     char filename[256];
     const char *content = CONTENT;
     size_t content_len = strlen(content);
-
-    io_context_t ctx = 0;
-    if (io_setup(MAX_AIO_EVENTS, &ctx) < 0) {
-        perror("io_setup failed");
-        return NULL;
-    }
-
-    struct iocb *iocbs[MAX_AIO_EVENTS];
-    struct io_event events[MAX_AIO_EVENTS];
-    struct iocb cb[MAX_AIO_EVENTS];
-    int fd[MAX_AIO_EVENTS];
-    int num_events = 0;
+    int fd[BATCH_SIZE];
+    int num_files = 0;
 
     for (int i = args->start; i < args->end; i++) {
         snprintf(filename, sizeof(filename), "%sfile%d.txt", FOLDER, i);
-        fd[num_events] = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        if (fd[num_events] == -1) {
-            perror("Error opening file");
+        fd[num_files] = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd[num_files] == -1) {
+            fprintf(stderr, "Error opening file %s: %s\n", filename, strerror(errno));
             continue;
         }
+        num_files++;
 
-        iocbs[num_events] = &cb[num_events];
-        io_prep_pwrite(&cb[num_events], fd[num_events], (void *)content, content_len, 0);
-        num_events++;
-
-        if (num_events == MAX_AIO_EVENTS || i == args->end - 1) {
-            if (io_submit(ctx, num_events, iocbs) != num_events) {
-                perror("io_submit failed");
-                for (int j = 0; j < num_events; j++) {
-                    close(fd[j]);
+        if (num_files == BATCH_SIZE || i == args->end - 1) {
+            printf("Thread %ld writing %d files at file %d\n", pthread_self(), num_files, i);
+            for (int j = 0; j < num_files; j++) {
+                if (write(fd[j], content, content_len) == -1) {
+                    fprintf(stderr, "Error writing to file %d: %s\n", i - num_files + j + 1, strerror(errno));
                 }
-                io_destroy(ctx);
-                return NULL;
+                close(fd[j]);
             }
-
-            int ret;
-            while ((ret = io_getevents(ctx, 1, num_events, events, NULL)) > 0) {
-                for (int j = 0; j < ret; j++) {
-                    fdatasync(fd[j]);
-                    close(fd[j]);
-                }
-            }
-            num_events = 0;
+            num_files = 0;
         }
     }
 
-    io_destroy(ctx);
     return NULL;
 }
 
