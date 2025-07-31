@@ -9,6 +9,7 @@ content_len: .quad . - content
 fmt_debug: .string "Writing %d files at file %d\n"
 fmt_time: .string "Time taken: %.2f ms\n"
 fmt_error: .string "Error: %s\n"
+fmt_open_error: .string "Error opening %s: %s\n" # New format string for open errors
 mkdir_error: .string "Error creating directory"
 stat_error: .string "Error checking directory"
         .equ num_files, 1000
@@ -22,7 +23,6 @@ const_1000: .double 1000.0
         .lcomm fds, 32 * 4
         .lcomm ts_start, 16
         .lcomm ts_end, 16
-        .lcomm errno_str, 256
         .lcomm st, 144
 
         .section .text
@@ -71,29 +71,32 @@ file_loop:
         cmpq $num_files, %r12
         jge end_loop
 
+        # Build the filename string
         leaq filename(%rip), %rdi
         leaq file_prefix(%rip), %rsi
         call strcpy
         movq %r12, %rax
         leaq filename(%rip), %rsi
-        addq $11, %rsi
+        addq $12, %rsi # FIX: Correct offset for "modules/file" (12 chars)
         call itoa
         leaq file_suffix(%rip), %rsi
         call strcat
 
+        # Open the file
         movq $2, %rax
         leaq filename(%rip), %rdi
-        movq $577, %rsi
+        movq $577, %rsi # O_CREAT | O_WRONLY | O_TRUNC
         movq $0644, %rdx
         syscall
         cmpq $0, %rax
         jl open_error
         
-        # FIX: Load address of fds into rbx, then use it as a base.
+        # Store the file descriptor
         leaq fds(%rip), %rbx
         movl %eax, (%rbx,%r13,4)
         incq %r13
 
+        # Prepare the iovec structure for this file
         movq %r13, %rax
         decq %rax
         shlq $4, %rax
@@ -104,10 +107,13 @@ file_loop:
         movq content_len(%rip), %rcx
         movq %rcx, 8(%rbx)
 
+        # If batch is full or we are at the last file, write the batch
         cmpq $batch_size, %r13
         je write_batch
         cmpq $(num_files - 1), %r12
         je write_batch
+
+        # Continue to next file
         incq %r12
         jmp file_loop
 
@@ -118,17 +124,14 @@ write_batch:
         xorq %rax, %rax
         call printf
 
-        movq %r13, %r14
-        xorq %r15, %r15
+        movq %r13, %r14 # Save batch size
+        xorq %r15, %r15 # Loop counter for batch
 write_loop:
         cmpq %r14, %r15
         jge end_write
-        movq $20, %rax
-        
-        # FIX: Load address of fds into rbx, then use it as a base.
+        movq $20, %rax # syscall: writev
         leaq fds(%rip), %rbx
         movl (%rbx,%r15,4), %edi
-        
         leaq iovecs(%rip), %rsi
         movq %r15, %rax
         shlq $4, %rax
@@ -136,7 +139,7 @@ write_loop:
         movq $1, %rdx
         syscall
         cmpq $0, %rax
-        jl write_error
+        jl write_error # Jump to error handler on failure
         incq %r15
         jmp write_loop
 
@@ -145,22 +148,20 @@ end_write:
 close_loop:
         cmpq %r14, %r15
         jge end_close
-        movq $3, %rax
-        
-        # FIX: Load address of fds into rbx, then use it as a base.
+        movq $3, %rax # syscall: close
         leaq fds(%rip), %rbx
         movl (%rbx,%r15,4), %edi
-        
         syscall
         incq %r15
         jmp close_loop
 
 end_close:
-        xorq %r13, %r13
+        xorq %r13, %r13 # Reset batch counter
         incq %r12
         jmp file_loop
 
 end_loop:
+        # Get end time
         movq $228, %rax
         movq $1, %rdi
         leaq ts_end(%rip), %rsi
@@ -168,15 +169,28 @@ end_loop:
         cmpq $0, %rax
         jne error_exit
 
-        movq ts_end(%rip), %rax
-        subq ts_start(%rip), %rax
-        cvtsi2sdq %rax, %xmm0
-        movq ts_end+8(%rip), %rax
-        subq ts_start+8(%rip), %rax
+        # FIX: Correctly calculate elapsed time in milliseconds, handling nanosecond borrow
+        movq    ts_end+8(%rip), %rax    # rax = end.tv_nsec
+        subq    ts_start+8(%rip), %rax  # rax = nsec_diff
+        movq    ts_end(%rip), %rcx      # rcx = end.tv_sec
+        subq    ts_start(%rip), %rcx    # rcx = sec_diff
+
+        # Handle nanosecond borrow if nsec_diff is negative
+        cmpq    $0, %rax
+        jge     no_borrow
+        addq    $1000000000, %rax       # Add 1 billion nanoseconds
+        subq    $1, %rcx                # Subtract 1 second
+no_borrow:
+        # Convert seconds to milliseconds
+        cvtsi2sdq %rcx, %xmm0
+        mulsd   const_1000(%rip), %xmm0
+
+        # Convert nanoseconds to milliseconds
         cvtsi2sdq %rax, %xmm1
-        divsd const_1e6(%rip), %xmm1
-        addsd %xmm1, %xmm0
-        mulsd const_1000(%rip), %xmm0
+        divsd   const_1e6(%rip), %xmm1
+
+        # Add them up for total milliseconds
+        addsd   %xmm1, %xmm0
 
         leaq fmt_time(%rip), %rdi
         movq $1, %rax
@@ -187,24 +201,32 @@ end_loop:
         xorq %rax, %rax
         ret
 
+# --- Error Handlers ---
+
 open_error:
-        leaq fmt_error(%rip), %rdi
-        leaq filename(%rip), %rsi
-        xorq %rax, %rax
-        call printf
-        incq %r12
-        jmp file_loop
+    # FIX: Provide a detailed error message for open failures
+    negq %rax                   # rax = -errno -> errno
+    movq %rax, %rdi             # rdi = errno for strerror
+    call strerror
+    movq %rax, %rdx             # rdx = error string for printf
+    leaq fmt_open_error(%rip), %rdi # rdi = "Error opening %s: %s\n"
+    leaq filename(%rip), %rsi   # rsi = filename
+    xorq %rax, %rax
+    call printf
+    incq %r12
+    jmp file_loop
 
 write_error:
-        leaq fmt_error(%rip), %rdi
-        leaq errno_str(%rip), %rsi
-        call strerror
-        movq %rax, %rsi
-        leaq fmt_error(%rip), %rdi
-        xorq %rax, %rax
-        call printf
-        incq %r15
-        jmp write_loop
+    # FIX: Correctly get and print the error string from the OS
+    negq %rax                   # rax = -errno -> errno
+    movq %rax, %rdi             # rdi = errno for strerror
+    call strerror
+    movq %rax, %rsi             # rsi = error string for printf
+    leaq fmt_error(%rip), %rdi  # rdi = "Error: %s\n"
+    xorq %rax, %rax
+    call printf
+    incq %r15
+    jmp write_loop
 
 mkdir_error_exit:
         leaq fmt_error(%rip), %rdi
@@ -223,19 +245,22 @@ stat_error_exit:
         jmp exit
 
 error_exit:
-        leaq fmt_error(%rip), %rdi
-        leaq errno_str(%rip), %rsi
-        call strerror
-        movq %rax, %rsi
-        leaq fmt_error(%rip), %rdi
-        xorq %rax, %rax
-        call printf
-        movq $1, %rax
+    # FIX: Correctly handle generic syscall errors
+    negq %rax
+    movq %rax, %rdi
+    call strerror
+    movq %rax, %rsi
+    leaq fmt_error(%rip), %rdi
+    xorq %rax, %rax
+    call printf
+    movq $1, %rax
 
 exit:
         movq %rbp, %rsp
         popq %rbp
         ret
+
+# --- String Utilities (unchanged) ---
 
 strcpy:
         pushq %rbx
