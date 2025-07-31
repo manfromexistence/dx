@@ -10,3 +10,10 @@ find . -type d -name "tests" -exec rm -r {} +
 
 find . -maxdepth 1 -mindepth 1 ! -name "cli" ! -name "src" ! -name "creates" ! -name "packages" -exec rm -rf {} +
 ```
+
+
+Remove all comments from this rust and don't change anything for now!
+
+```
+
+```
