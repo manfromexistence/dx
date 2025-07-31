@@ -5,11 +5,11 @@ folder: .string "modules/"
 file_prefix: .string "modules/file"
 file_suffix: .string ".txt"
 content: .string "hello world\n"
-content_len: .quad . - content
+content_len: .quad 12 # FIX: Correct length of content string to avoid writing null byte.
 fmt_debug: .string "Writing %d files at file %d\n"
 fmt_time: .string "Time taken: %.2f ms\n"
 fmt_error: .string "Error: %s\n"
-fmt_open_error: .string "Error opening %s: %s\n" # New format string for open errors
+fmt_open_error: .string "Error opening %s: %s\n"
 mkdir_error: .string "Error creating directory"
 stat_error: .string "Error checking directory"
         .equ num_files, 1000
@@ -76,9 +76,9 @@ file_loop:
         leaq file_prefix(%rip), %rsi
         call strcpy
         movq %r12, %rax
-        leaq filename(%rip), %rsi
-        addq $12, %rsi # FIX: Correct offset for "modules/file" (12 chars)
+        leaq filename+12(%rip), %rsi # Position to write number after "modules/file"
         call itoa
+        leaq filename(%rip), %rdi
         leaq file_suffix(%rip), %rsi
         call strcat
 
@@ -129,15 +129,25 @@ write_batch:
 write_loop:
         cmpq %r14, %r15
         jge end_write
-        movq $20, %rax # syscall: writev
-        leaq fds(%rip), %rbx
-        movl (%rbx,%r15,4), %edi
-        leaq iovecs(%rip), %rsi
+
+        # Get the iovec for the current file
+        leaq iovecs(%rip), %rbx
         movq %r15, %rax
-        shlq $4, %rax
-        addq %rax, %rsi
-        movq $1, %rdx
+        shlq $4, %rax               # rax = r15 * 16 (sizeof iovec)
+        addq %rax, %rbx             # rbx -> iovecs[r15]
+
+        # Set up arguments for write(fd, buf, count)
+        movq (%rbx), %rsi           # rsi = iovecs[r15].iov_base (buffer)
+        movq 8(%rbx), %rdx          # rdx = iovecs[r15].iov_len (count)
+        
+        # Get the file descriptor
+        leaq fds(%rip), %rbx
+        movl (%rbx,%r15,4), %edi    # edi = fds[r15] (file descriptor)
+        
+        # Perform the write syscall
+        movq $1, %rax               # syscall: write
         syscall
+
         cmpq $0, %rax
         jl write_error # Jump to error handler on failure
         incq %r15
@@ -169,27 +179,21 @@ end_loop:
         cmpq $0, %rax
         jne error_exit
 
-        # FIX: Correctly calculate elapsed time in milliseconds, handling nanosecond borrow
-        movq    ts_end+8(%rip), %rax    # rax = end.tv_nsec
-        subq    ts_start+8(%rip), %rax  # rax = nsec_diff
-        movq    ts_end(%rip), %rcx      # rcx = end.tv_sec
-        subq    ts_start(%rip), %rcx    # rcx = sec_diff
+        # Correctly calculate elapsed time in milliseconds
+        movq    ts_end+8(%rip), %rax
+        subq    ts_start+8(%rip), %rax
+        movq    ts_end(%rip), %rcx
+        subq    ts_start(%rip), %rcx
 
-        # Handle nanosecond borrow if nsec_diff is negative
         cmpq    $0, %rax
         jge     no_borrow
-        addq    $1000000000, %rax       # Add 1 billion nanoseconds
-        subq    $1, %rcx                # Subtract 1 second
+        addq    $1000000000, %rax
+        subq    $1, %rcx
 no_borrow:
-        # Convert seconds to milliseconds
         cvtsi2sdq %rcx, %xmm0
         mulsd   const_1000(%rip), %xmm0
-
-        # Convert nanoseconds to milliseconds
         cvtsi2sdq %rax, %xmm1
         divsd   const_1e6(%rip), %xmm1
-
-        # Add them up for total milliseconds
         addsd   %xmm1, %xmm0
 
         leaq fmt_time(%rip), %rdi
@@ -204,25 +208,23 @@ no_borrow:
 # --- Error Handlers ---
 
 open_error:
-    # FIX: Provide a detailed error message for open failures
-    negq %rax                   # rax = -errno -> errno
-    movq %rax, %rdi             # rdi = errno for strerror
+    negq %rax
+    movq %rax, %rdi
     call strerror
-    movq %rax, %rdx             # rdx = error string for printf
-    leaq fmt_open_error(%rip), %rdi # rdi = "Error opening %s: %s\n"
-    leaq filename(%rip), %rsi   # rsi = filename
+    movq %rax, %rdx
+    leaq fmt_open_error(%rip), %rdi
+    leaq filename(%rip), %rsi
     xorq %rax, %rax
     call printf
     incq %r12
     jmp file_loop
 
 write_error:
-    # FIX: Correctly get and print the error string from the OS
-    negq %rax                   # rax = -errno -> errno
-    movq %rax, %rdi             # rdi = errno for strerror
+    negq %rax
+    movq %rax, %rdi
     call strerror
-    movq %rax, %rsi             # rsi = error string for printf
-    leaq fmt_error(%rip), %rdi  # rdi = "Error: %s\n"
+    movq %rax, %rsi
+    leaq fmt_error(%rip), %rdi
     xorq %rax, %rax
     call printf
     incq %r15
@@ -245,7 +247,6 @@ stat_error_exit:
         jmp exit
 
 error_exit:
-    # FIX: Correctly handle generic syscall errors
     negq %rax
     movq %rax, %rdi
     call strerror
