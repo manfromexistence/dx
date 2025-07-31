@@ -4,13 +4,14 @@ use rand::seq::SliceRandom;
 use regex::Regex;
 use rust_embed::RustEmbed;
 
-use crate::bubbles::{BubbleType, SpeechBubble};
-
-pub mod bubbles;
-pub mod errors;
+// Change these to use `super::` as they are sibling modules within `footer`
+use super::bubbles::{BubbleType, SpeechBubble};
+use super::errors::CustomError; // Make sure to add this use for CustomError
 
 #[derive(RustEmbed, Debug)]
-#[folder = "src/charas"]
+// IMPORTANT: The path here is relative to the *crate root* (your Cargo.toml location)
+// So, 'src/footer/charas' is the correct path for where your .chara files are located.
+#[folder = "src/footer/charas"]
 struct Asset;
 
 /// Source chara to load, either builtin or from external file.
@@ -51,21 +52,37 @@ pub const BUILTIN_CHARA: [&str; 24] = [
     "wartortle",
 ];
 
+// ... (rest of your load_raw_chara_string, strip_chara_string, parse_character functions)
+
 fn load_raw_chara_string(chara: &Chara) -> String {
     let mut raw_chara = String::new();
 
     match chara {
         Chara::File(s) => {
-            let mut file = File::open(s).unwrap_or_else(|err| todo!("Log ERROR: {:#?}", err));
+            // Using `eprintln` for errors in examples for simplicity,
+            // but in a real app, you'd want proper error propagation.
+            let mut file = File::open(s).unwrap_or_else(|err| {
+                eprintln!("ERROR: Failed to open character file: {:#?}", err);
+                std::process::exit(1); // Exit if file cannot be opened
+            });
             file.read_to_string(&mut raw_chara)
-                .unwrap_or_else(|err| todo!("Log ERROR: {:#?}", err));
+                .unwrap_or_else(|err| {
+                    eprintln!("ERROR: Failed to read character file: {:#?}", err);
+                    std::process::exit(1); // Exit if file cannot be read
+                });
         }
 
         Chara::Builtin(s) => {
             let name = format!("{}.chara", s);
-            let asset = Asset::get(&name).unwrap();
+            let asset = Asset::get(&name).unwrap_or_else(|| {
+                eprintln!("ERROR: Built-in character '{}' not found.", s);
+                std::process::exit(1); // Exit if asset not found
+            });
             raw_chara = from_utf8(&asset.data)
-                .unwrap_or_else(|err| todo!("Log ERROR: {:#?}", err))
+                .unwrap_or_else(|err| {
+                    eprintln!("ERROR: UTF-8 error decoding built-in character: {:#?}", err);
+                    std::process::exit(1); // Exit if UTF-8 decoding fails
+                })
                 .to_string();
         }
 
@@ -86,10 +103,16 @@ fn load_raw_chara_string(chara: &Chara) -> String {
 
         Chara::Random => {
             let charas = Asset::iter().collect::<Vec<_>>();
-            let choosen_chara = charas.choose(&mut rand::thread_rng()).unwrap().clone();
+            let choosen_chara = charas.choose(&mut rand::thread_rng()).unwrap_or_else(|| {
+                eprintln!("ERROR: No built-in characters found for random selection.");
+                std::process::exit(1); // Exit if no characters are available
+            }).clone();
             let asset = Asset::get(&choosen_chara).unwrap();
             raw_chara = from_utf8(&asset.data)
-                .unwrap_or_else(|err| todo!("Log ERROR: {:#?}", err))
+                .unwrap_or_else(|err| {
+                    eprintln!("ERROR: UTF-8 error decoding random character: {:#?}", err);
+                    std::process::exit(1); // Exit if UTF-8 decoding fails
+                })
                 .to_string();
         }
     }
