@@ -1,9 +1,8 @@
-#define _GNU_SOURCE
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
-#include <sys/types.h> // Required for mode_t on some systems
-#include <sys/mman.h>  // Required for mmap
+#include <sys/types.h>
+#include <sys/mman.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -16,18 +15,10 @@
 #define FOLDER "modules/"
 #define CONTENT "hello world from portable C code\n"
 
-// --- Common Structures ---
-
-// Arguments for each thread
 typedef struct {
     int start_index;
     int end_index;
 } ThreadArgs;
-
-
-// --- Method 1: Standard I/O (For Initial Creation) ---
-// This worker function is best for creating files for the first time.
-// It uses standard, portable open/write calls.
 
 void *create_files_worker(void *arg) {
     ThreadArgs *args = (ThreadArgs *)arg;
@@ -54,12 +45,6 @@ void *create_files_worker(void *arg) {
     return NULL;
 }
 
-
-// --- Method 2: Memory-Mapped I/O (For Overwriting) ---
-// This worker is a "smarter way" for when files already exist.
-// It maps the file directly into memory, allowing for very fast writes
-// by avoiding the overhead of the write() system call.
-
 void *overwrite_files_mmap_worker(void *arg) {
     ThreadArgs *args = (ThreadArgs *)arg;
     char filepath[512];
@@ -69,7 +54,6 @@ void *overwrite_files_mmap_worker(void *arg) {
     for (int i = args->start_index; i < args->end_index; i++) {
         snprintf(filepath, sizeof(filepath), "%sfile%d.txt", FOLDER, i);
 
-        // Open the file for reading and writing.
         int fd = open(filepath, O_RDWR | O_CREAT, 0644);
         if (fd == -1) {
             fprintf(stderr, "Thread %ld: (mmap) Error opening file %s: %s\n",
@@ -77,7 +61,6 @@ void *overwrite_files_mmap_worker(void *arg) {
             continue;
         }
 
-        // Ensure the file is the correct size for the mapping.
         if (ftruncate(fd, content_len) == -1) {
             fprintf(stderr, "Thread %ld: (mmap) Error truncating file %s: %s\n",
                     pthread_self(), filepath, strerror(errno));
@@ -85,7 +68,6 @@ void *overwrite_files_mmap_worker(void *arg) {
             continue;
         }
 
-        // Map the file into memory.
         void *map = mmap(NULL, content_len, PROT_WRITE, MAP_SHARED, fd, 0);
         if (map == MAP_FAILED) {
             fprintf(stderr, "Thread %ld: (mmap) Error mapping file %s: %s\n",
@@ -94,26 +76,19 @@ void *overwrite_files_mmap_worker(void *arg) {
             continue;
         }
 
-        // Write to the mapped memory as if it's a simple array.
         memcpy(map, content, content_len);
 
-        // Unmap the memory. The OS handles writing it back to the file.
         munmap(map, content_len);
 
-        // Close the file descriptor.
         close(fd);
     }
     return NULL;
 }
 
-
-// --- Main Application Logic ---
-
 int main() {
     struct timespec start_time, end_time;
     clock_gettime(CLOCK_MONOTONIC, &start_time);
 
-    // --- Directory Setup ---
     struct stat st;
     int folder_exists = 0;
     if (stat(FOLDER, &st) == -1) {
@@ -135,8 +110,6 @@ int main() {
         folder_exists = 1;
     }
 
-    // --- Threaded File Creation ---
-    // Choose the worker function based on whether the folder already exists.
     void *(*worker_func)(void *);
     if (folder_exists) {
         printf("INFO: Folder exists. Using fast 'mmap' overwrite method.\n");
@@ -162,7 +135,6 @@ int main() {
         pthread_join(threads[i], NULL);
     }
 
-    // --- Timing and Completion ---
     clock_gettime(CLOCK_MONOTONIC, &end_time);
     double time_ms = (end_time.tv_sec - start_time.tv_sec) * 1000.0 +
                      (end_time.tv_nsec - start_time.tv_nsec) / 1000000.0;
