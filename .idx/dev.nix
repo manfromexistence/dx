@@ -6,6 +6,7 @@
     pkgs.bun
     pkgs.tree
     pkgs.gnumake
+    pkgs.libaio
   ];
   env = { };
   idx = {
