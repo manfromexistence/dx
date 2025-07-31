@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -9,10 +10,10 @@
 #include <pthread.h>
 
 #define NUM_FILES 1000
-#define NUM_THREADS 4
+#define NUM_THREADS 8
 #define FOLDER "modules/"
 #define CONTENT "hello world\n"
-#define BATCH_SIZE 64
+#define BATCH_SIZE 32
 
 typedef struct {
     int start;
@@ -25,6 +26,7 @@ void *create_files(void *arg) {
     const char *content = CONTENT;
     size_t content_len = strlen(content);
     int fd[BATCH_SIZE];
+    struct iovec iov[BATCH_SIZE];
     int num_files = 0;
 
     for (int i = args->start; i < args->end; i++) {
@@ -34,12 +36,14 @@ void *create_files(void *arg) {
             fprintf(stderr, "Error opening file %s: %s\n", filename, strerror(errno));
             continue;
         }
+        iov[num_files].iov_base = (void *)content;
+        iov[num_files].iov_len = content_len;
         num_files++;
 
         if (num_files == BATCH_SIZE || i == args->end - 1) {
             printf("Thread %ld writing %d files at file %d\n", pthread_self(), num_files, i);
             for (int j = 0; j < num_files; j++) {
-                if (write(fd[j], content, content_len) == -1) {
+                if (writev(fd[j], &iov[j], 1) == -1) {
                     fprintf(stderr, "Error writing to file %d: %s\n", i - num_files + j + 1, strerror(errno));
                 }
                 close(fd[j]);
