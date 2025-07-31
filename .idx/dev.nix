@@ -15,7 +15,6 @@
       "ziglang.vscode-zig"
       "tamasfe.even-better-toml"
       "rust-lang.rust-analyzer"
-      "eamodio.gitlens"
     ];
     workspace = {
       onCreate = {
