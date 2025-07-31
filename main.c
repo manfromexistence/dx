@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <errno.h>
 
 #define NUM_FILES 1000
 #define FOLDER "modules"
@@ -14,8 +15,20 @@ int main() {
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
 
-    // Create modules directory if it doesn't exist
-    mkdir(FOLDER, 0755);
+    // Check if modules directory exists
+    struct stat st;
+    if (stat(FOLDER, &st) == -1) {
+        if (errno == ENOENT) {
+            // Directory does not exist, create it
+            if (mkdir(FOLDER, 0755) == -1) {
+                perror("Error creating directory");
+                return 1;
+            }
+        } else {
+            perror("Error checking directory");
+            return 1;
+        }
+    }
 
     char filename[256] = FOLDER "/file";
     char num_buf[16];
@@ -26,7 +39,7 @@ int main() {
     for (int i = 0; i < NUM_FILES; i++) {
         // Construct filename (e.g., modules/file0.txt)
         snprintf(num_buf, sizeof(num_buf), "%d.txt", i);
-        strcpy(filename + folder_len + 5, num_buf); // Append number and .txt
+        strcpy(filename + folder_len + 5, num_buf);
 
         // Open file with low-level syscall
         int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
