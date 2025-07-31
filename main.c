@@ -13,7 +13,8 @@
 #define NUM_FILES 1000
 #define NUM_THREADS 8
 #define FOLDER "modules/"
-#define CONTENT "hello world from portable C code\n"
+#define CREATE_CONTENT "Files Created!\n"
+#define OVERWRITE_CONTENT "Files Overwritten!\n"
 
 typedef struct {
     int start_index;
@@ -23,8 +24,8 @@ typedef struct {
 void *create_files_worker(void *arg) {
     ThreadArgs *args = (ThreadArgs *)arg;
     char filepath[512];
-    const char *content = CONTENT;
-    size_t content_len = strlen(content);
+    const char *content = CREATE_CONTENT;
+    size_t content_len = strlen(CREATE_CONTENT);
 
     for (int i = args->start_index; i < args->end_index; i++) {
         snprintf(filepath, sizeof(filepath), "%sfile%d.txt", FOLDER, i);
@@ -48,8 +49,8 @@ void *create_files_worker(void *arg) {
 void *overwrite_files_mmap_worker(void *arg) {
     ThreadArgs *args = (ThreadArgs *)arg;
     char filepath[512];
-    const char *content = CONTENT;
-    size_t content_len = strlen(content);
+    const char *content = OVERWRITE_CONTENT;
+    size_t content_len = strlen(OVERWRITE_CONTENT);
 
     for (int i = args->start_index; i < args->end_index; i++) {
         snprintf(filepath, sizeof(filepath), "%sfile%d.txt", FOLDER, i);
