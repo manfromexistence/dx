@@ -15,5 +15,6 @@ find . -maxdepth 1 -mindepth 1 ! -name "cli" ! -name "src" ! -name "creates" ! -
 Remove all comments from this rust and don't change anything for now!
 
 ```
-gcc -nostdlib -o main main.s
+gcc -O3 main.c -o main
+./main
 ```
