@@ -86,7 +86,10 @@ file_loop:
         syscall
         cmpq $0, %rax
         jl open_error
-        movl %eax, fds(%rip,%r13,4)
+        
+        # FIX: Load address of fds into rbx, then use it as a base.
+        leaq fds(%rip), %rbx
+        movl %eax, (%rbx,%r13,4)
         incq %r13
 
         movq %r13, %rax
@@ -119,7 +122,11 @@ write_loop:
         cmpq %r14, %r15
         jge end_write
         movq $20, %rax
-        movl fds(%rip,%r15,4), %edi
+        
+        # FIX: Load address of fds into rbx, then use it as a base.
+        leaq fds(%rip), %rbx
+        movl (%rbx,%r15,4), %edi
+        
         leaq iovecs(%rip), %rsi
         movq %r15, %rax
         shlq $4, %rax
@@ -137,7 +144,11 @@ close_loop:
         cmpq %r14, %r15
         jge end_close
         movq $3, %rax
-        movl fds(%rip,%r15,4), %edi
+        
+        # FIX: Load address of fds into rbx, then use it as a base.
+        leaq fds(%rip), %rbx
+        movl (%rbx,%r15,4), %edi
+        
         syscall
         incq %r15
         jmp close_loop
