@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h> // Required for mode_t on some systems
+#include <sys/mman.h>  // Required for mmap
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -24,41 +25,82 @@ typedef struct {
 } ThreadArgs;
 
 
-// --- Portable File Creation Method ---
-// This worker function is designed for maximum portability. It uses
-// standard open, write, and close calls that are available on any
-// POSIX-compliant system (like Linux, macOS, BSD) and have
-// equivalents on Windows.
+// --- Method 1: Standard I/O (For Initial Creation) ---
+// This worker function is best for creating files for the first time.
+// It uses standard, portable open/write calls.
 
 void *create_files_worker(void *arg) {
     ThreadArgs *args = (ThreadArgs *)arg;
-    char filepath[512]; // Increased buffer size for safety
+    char filepath[512];
     const char *content = CONTENT;
     size_t content_len = strlen(content);
 
     for (int i = args->start_index; i < args->end_index; i++) {
-        // Construct the full path for the file to be created.
         snprintf(filepath, sizeof(filepath), "%sfile%d.txt", FOLDER, i);
-
-        // Open the file with flags to create it if it doesn't exist,
-        // truncate it if it does, and make it write-only.
-        // The mode 0644 sets the file permissions (read/write for owner, read for others).
         int fd = open(filepath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 
         if (fd == -1) {
-            // If opening the file fails, print an error and move to the next file.
             fprintf(stderr, "Thread %ld: Error opening file %s: %s\n",
                     pthread_self(), filepath, strerror(errno));
             continue;
         }
 
-        // Write the predefined content to the file.
         if (write(fd, content, content_len) == -1) {
             fprintf(stderr, "Thread %ld: Error writing to file %s: %s\n",
                     pthread_self(), filepath, strerror(errno));
         }
+        close(fd);
+    }
+    return NULL;
+}
 
-        // Always close the file descriptor when done.
+
+// --- Method 2: Memory-Mapped I/O (For Overwriting) ---
+// This worker is a "smarter way" for when files already exist.
+// It maps the file directly into memory, allowing for very fast writes
+// by avoiding the overhead of the write() system call.
+
+void *overwrite_files_mmap_worker(void *arg) {
+    ThreadArgs *args = (ThreadArgs *)arg;
+    char filepath[512];
+    const char *content = CONTENT;
+    size_t content_len = strlen(content);
+
+    for (int i = args->start_index; i < args->end_index; i++) {
+        snprintf(filepath, sizeof(filepath), "%sfile%d.txt", FOLDER, i);
+
+        // Open the file for reading and writing.
+        int fd = open(filepath, O_RDWR | O_CREAT, 0644);
+        if (fd == -1) {
+            fprintf(stderr, "Thread %ld: (mmap) Error opening file %s: %s\n",
+                    pthread_self(), filepath, strerror(errno));
+            continue;
+        }
+
+        // Ensure the file is the correct size for the mapping.
+        if (ftruncate(fd, content_len) == -1) {
+            fprintf(stderr, "Thread %ld: (mmap) Error truncating file %s: %s\n",
+                    pthread_self(), filepath, strerror(errno));
+            close(fd);
+            continue;
+        }
+
+        // Map the file into memory.
+        void *map = mmap(NULL, content_len, PROT_WRITE, MAP_SHARED, fd, 0);
+        if (map == MAP_FAILED) {
+            fprintf(stderr, "Thread %ld: (mmap) Error mapping file %s: %s\n",
+                    pthread_self(), filepath, strerror(errno));
+            close(fd);
+            continue;
+        }
+
+        // Write to the mapped memory as if it's a simple array.
+        memcpy(map, content, content_len);
+
+        // Unmap the memory. The OS handles writing it back to the file.
+        munmap(map, content_len);
+
+        // Close the file descriptor.
         close(fd);
     }
     return NULL;
@@ -72,10 +114,9 @@ int main() {
     clock_gettime(CLOCK_MONOTONIC, &start_time);
 
     // --- Directory Setup ---
-    // Check if the target directory exists.
     struct stat st;
+    int folder_exists = 0;
     if (stat(FOLDER, &st) == -1) {
-        // If it doesn't exist (ENOENT), create it.
         if (errno == ENOENT) {
             printf("INFO: Folder does not exist. Creating '%s'...\n", FOLDER);
             if (mkdir(FOLDER, 0755) == -1) {
@@ -83,21 +124,28 @@ int main() {
                 return 1;
             }
         } else {
-            // For any other stat error, exit.
             perror("Fatal: Could not stat directory");
             return 1;
         }
     } else {
-        // If stat succeeds, check if it's actually a directory.
         if (!S_ISDIR(st.st_mode)) {
             fprintf(stderr, "Fatal: '%s' exists but is not a directory.\n", FOLDER);
             return 1;
         }
-        printf("INFO: Folder '%s' already exists. Proceeding to create files.\n", FOLDER);
+        folder_exists = 1;
     }
 
-
     // --- Threaded File Creation ---
+    // Choose the worker function based on whether the folder already exists.
+    void *(*worker_func)(void *);
+    if (folder_exists) {
+        printf("INFO: Folder exists. Using fast 'mmap' overwrite method.\n");
+        worker_func = overwrite_files_mmap_worker;
+    } else {
+        printf("INFO: Using standard 'write' method for initial creation.\n");
+        worker_func = create_files_worker;
+    }
+
     pthread_t threads[NUM_THREADS];
     ThreadArgs args[NUM_THREADS];
     int files_per_thread = NUM_FILES / NUM_THREADS;
@@ -106,13 +154,10 @@ int main() {
 
     for (int i = 0; i < NUM_THREADS; i++) {
         args[i].start_index = i * files_per_thread;
-        // Ensure the last thread handles any remaining files.
         args[i].end_index = (i == NUM_THREADS - 1) ? NUM_FILES : (i + 1) * files_per_thread;
-
-        pthread_create(&threads[i], NULL, create_files_worker, &args[i]);
+        pthread_create(&threads[i], NULL, worker_func, &args[i]);
     }
 
-    // Wait for all threads to complete their work.
     for (int i = 0; i < NUM_THREADS; i++) {
         pthread_join(threads[i], NULL);
     }
@@ -122,7 +167,7 @@ int main() {
     double time_ms = (end_time.tv_sec - start_time.tv_sec) * 1000.0 +
                      (end_time.tv_nsec - start_time.tv_nsec) / 1000000.0;
 
-    printf("\nFinished creating %d files.\n", NUM_FILES);
+    printf("\nFinished creating/updating %d files.\n", NUM_FILES);
     printf("Total time taken: %.2f ms\n", time_ms);
 
     return 0;
