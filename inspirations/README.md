@@ -1,6 +1,8 @@
 # Inspirations
 ```
 git clone https://github.com/torvalds/linux && cd linux && rm -rf .git && cd ..
+
+git clone https://github.com/torvalds/linux && cd linux && rm -rf .git && cd ..
 git clone https://github.com/git/git.git && cd git && rm -rf .git && cd ..
 git clone https://github.com/biomejs/biome && cd biome && rm -rf .git && cd ..
 git clone https://github.com/latipun7/charasay && cd charasay && rm -rf .git && cd ..
@@ -29,4 +31,30 @@ git clone https://github.com/haydenbleasel/ultracite.git && cd ultracite && rm -
 git clone https://github.com/tailwindlabs/tailwindcss && cd tailwindcss && rm -rf .git && cd ..
 git clone https://github.com/AmanVarshney01/create-better-t-stack && cd create-better-t-stack && rm -rf .git && cd ..
 git clone https://github.com/clap-rs/term_size-rs.git && cd term_size-rs && rm -rf .git && cd ..
+```
+
+
+```
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+libc = "0.2.174"
+[target.'cfg(target_os = "windows")'.dependencies]
+winapi = { version = "0.3.9", features = ["wincon", "processenv", "winbase"] }
+
+clap_complete = "4.5.42"
+clap = { version = "4.5.27", features = ["derive", "wrap_help"], optional = true }
+rust-embed = { version = "8.5.0", features = ["debug-embed"] }
+textwrap = { version = "0.16.1", features = ["terminal_size"] }
+unicode-width = "0.2.0"
+regex = "1.11.1"
+rand = "0.8.5"
+strip-ansi-escapes = "0.2.1"
+
+bstr = "1.9"
+colorgrad = { version = "0.7" }
+dirs = { version = "6.0", optional = true }
+fastrand = "2.1"
+mimalloc = { version = "0.1", optional = true, default-features = false }
+noise = { version = "0.9", default-features = false }
+shlex = { version = "1.3", optional = true }
+unicode-segmentation = "1.10"
 ```
