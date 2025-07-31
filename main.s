@@ -1,3 +1,5 @@
+.section .note.GNU-stack,"",@progbits
+
 .section .data
 folder: .string "modules/"
 file_prefix: .string "modules/file"
