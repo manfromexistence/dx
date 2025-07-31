@@ -11,7 +11,7 @@
 #include <stdlib.h>
 
 #define NUM_FILES 1000
-#define NUM_THREADS 8
+#define NUM_THREADS 1
 #define FOLDER "modules/"
 #define CREATE_CONTENT "Files Created!\n"
 #define OVERWRITE_CONTENT "Files Overwritten!\n"
