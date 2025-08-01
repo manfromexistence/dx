@@ -4,4 +4,5 @@ fn main() {
     cc::Build::new()
         .file("src/generator/main.c")
         .compile("generator");
+    println!("cargo:rustc-link-lib=pthread");
 }
