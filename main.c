@@ -16,17 +16,14 @@
 #define CREATE_CONTENT "Files Created!\n"
 #define OVERWRITE_CONTENT "Files Overwritten!\n"
 
-// Arguments for each worker thread.
 typedef struct {
     int start_index;
     int end_index;
-    int dir_fd; // File descriptor for the base directory
+    int dir_fd;
     const char *content;
     size_t content_len;
 } ThreadArgs;
 
-// A highly optimized integer-to-string function.
-// It writes the number to the end of the buffer and returns a pointer to the start of the number.
 static inline char* fast_itoa(int value, char* buffer_end) {
     *buffer_end = '\0';
     char* p = buffer_end;
@@ -35,8 +32,7 @@ static inline char* fast_itoa(int value, char* buffer_end) {
         *--p = '0';
         return p;
     }
-    
-    // This loop is efficient for positive integers.
+
     do {
         *--p = '0' + (value % 10);
         value /= 10;
@@ -45,8 +41,6 @@ static inline char* fast_itoa(int value, char* buffer_end) {
     return p;
 }
 
-// Worker for creating new files using write() and openat().
-// This code is unchanged in its core logic.
 void *create_files_worker(void *arg) __attribute__((hot));
 void *create_files_worker(void *arg) {
     ThreadArgs *args = (ThreadArgs *)arg;
@@ -77,8 +71,6 @@ void *create_files_worker(void *arg) {
     return NULL;
 }
 
-// Worker for overwriting existing files using mmap() and openat().
-// This is now faster because the ftruncate() call has been removed.
 void *overwrite_files_mmap_worker(void *arg) __attribute__((hot));
 void *overwrite_files_mmap_worker(void *arg) {
     ThreadArgs *args = (ThreadArgs *)arg;
@@ -102,10 +94,6 @@ void *overwrite_files_mmap_worker(void *arg) {
         if (fd == -1) {
             continue;
         }
-
-        // OPTIMIZATION: The ftruncate() call is no longer needed because we ensure
-        // all files are created with a fixed maximum size from the beginning.
-        // This removes a system call from this hot loop.
 
         void *map = mmap(NULL, args->content_len, PROT_WRITE, MAP_SHARED, fd, 0);
         if (map == MAP_FAILED) {
@@ -137,7 +125,6 @@ int main() {
     const char *content_to_write;
     const char *action_description;
 
-    // --- Optimization: Pad content to a fixed size ---
     const size_t create_len = strlen(CREATE_CONTENT);
     const size_t overwrite_len = strlen(OVERWRITE_CONTENT);
     const size_t max_len = (create_len > overwrite_len) ? create_len : overwrite_len;
@@ -145,7 +132,6 @@ int main() {
     char padded_create_content[max_len + 1];
     char padded_overwrite_content[max_len + 1];
 
-    // Copy original content and fill the rest with spaces.
     memcpy(padded_create_content, CREATE_CONTENT, create_len);
     memset(padded_create_content + create_len, ' ', max_len - create_len);
     padded_create_content[max_len] = '\0';
@@ -153,7 +139,6 @@ int main() {
     memcpy(padded_overwrite_content, OVERWRITE_CONTENT, overwrite_len);
     memset(padded_overwrite_content + overwrite_len, ' ', max_len - overwrite_len);
     padded_overwrite_content[max_len] = '\0';
-    // --- End of Optimization ---
 
     if (faccessat(dir_fd, "file0.txt", F_OK, 0) == 0) {
         printf("INFO: Files exist. Using 'mmap' + 'openat' overwrite method.\n");
@@ -178,7 +163,7 @@ int main() {
         args[i].end_index = (i == NUM_THREADS - 1) ? NUM_FILES : (i + 1) * files_per_thread;
         args[i].dir_fd = dir_fd;
         args[i].content = content_to_write;
-        args[i].content_len = max_len; // Use the fixed max length
+        args[i].content_len = max_len;
         pthread_create(&threads[i], NULL, worker_func, &args[i]);
     }
 
