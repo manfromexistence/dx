@@ -10,77 +10,93 @@
 #include <pthread.h>
 #include <stdlib.h>
 
+// For MAX performance, compile using Profile-Guided Optimization (PGO).
+// Step 1 (Instrument): gcc -O3 -fprofile-generate -o file_creator_instrumented file_creator.c -lpthread
+// Step 2 (Run):       ./file_creator_instrumented
+// Step 3 (Optimize):  gcc -O3 -fprofile-use -flto -march=native -o main main.c -lpthread
+
 #define NUM_FILES 1000
 #define NUM_THREADS 8
 #define FOLDER "modules/"
+#define FILE_PREFIX "file"
+#define FILE_SUFFIX ".txt"
 #define CREATE_CONTENT "Files Created!\n"
 #define OVERWRITE_CONTENT "Files Overwritten!\n"
 
 typedef struct {
     int start_index;
     int end_index;
+    int dir_fd;
+    const char *content;
+    size_t content_len;
 } ThreadArgs;
 
+// A highly optimized integer-to-string function.
+static inline char* fast_itoa(int value, char* buffer_end) {
+    *buffer_end = '\0';
+    char* p = buffer_end;
+    if (value == 0) { *--p = '0'; return p; }
+    do { *--p = '0' + (value % 10); value /= 10; } while (value > 0);
+    return p;
+}
+
+// Worker using write() and openat(). Marked as 'hot' for the compiler.
+void *create_files_worker(void *arg) __attribute__((hot));
 void *create_files_worker(void *arg) {
     ThreadArgs *args = (ThreadArgs *)arg;
-    char filepath[512];
-    const char *content = CREATE_CONTENT;
-    size_t content_len = strlen(CREATE_CONTENT);
+    char filename[256];
+    
+    const size_t prefix_len = strlen(FILE_PREFIX);
+    const size_t suffix_len = strlen(FILE_SUFFIX);
+    memcpy(filename, FILE_PREFIX, prefix_len);
+    char *num_start_ptr = filename + prefix_len;
 
     for (int i = args->start_index; i < args->end_index; i++) {
-        snprintf(filepath, sizeof(filepath), "%sfile%d.txt", FOLDER, i);
-        int fd = open(filepath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        char num_buf[12];
+        char* num_str = fast_itoa(i, num_buf + sizeof(num_buf) - 1);
+        size_t num_len = (num_buf + sizeof(num_buf) - 1) - num_str;
+        
+        memcpy(num_start_ptr, num_str, num_len);
+        memcpy(num_start_ptr + num_len, FILE_SUFFIX, suffix_len + 1);
 
-        if (fd == -1) {
-            fprintf(stderr, "Thread %ld: Error opening file %s: %s\n",
-                    pthread_self(), filepath, strerror(errno));
-            continue;
-        }
+        int fd = openat(args->dir_fd, filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd == -1) continue;
 
-        if (write(fd, content, content_len) == -1) {
-            fprintf(stderr, "Thread %ld: Error writing to file %s: %s\n",
-                    pthread_self(), filepath, strerror(errno));
-        }
+        write(fd, args->content, args->content_len);
         close(fd);
     }
     return NULL;
 }
 
+// Worker using mmap() and openat(). Marked as 'hot' for the compiler.
+void *overwrite_files_mmap_worker(void *arg) __attribute__((hot));
 void *overwrite_files_mmap_worker(void *arg) {
     ThreadArgs *args = (ThreadArgs *)arg;
-    char filepath[512];
-    const char *content = OVERWRITE_CONTENT;
-    size_t content_len = strlen(OVERWRITE_CONTENT);
+    char filename[256];
+
+    const size_t prefix_len = strlen(FILE_PREFIX);
+    const size_t suffix_len = strlen(FILE_SUFFIX);
+    memcpy(filename, FILE_PREFIX, prefix_len);
+    char *num_start_ptr = filename + prefix_len;
 
     for (int i = args->start_index; i < args->end_index; i++) {
-        snprintf(filepath, sizeof(filepath), "%sfile%d.txt", FOLDER, i);
+        char num_buf[12];
+        char* num_str = fast_itoa(i, num_buf + sizeof(num_buf) - 1);
+        size_t num_len = (num_buf + sizeof(num_buf) - 1) - num_str;
+        
+        memcpy(num_start_ptr, num_str, num_len);
+        memcpy(num_start_ptr + num_len, FILE_SUFFIX, suffix_len + 1);
 
-        int fd = open(filepath, O_RDWR | O_CREAT, 0644);
-        if (fd == -1) {
-            fprintf(stderr, "Thread %ld: (mmap) Error opening file %s: %s\n",
-                    pthread_self(), filepath, strerror(errno));
-            continue;
-        }
+        int fd = openat(args->dir_fd, filename, O_RDWR);
+        if (fd == -1) continue;
 
-        if (ftruncate(fd, content_len) == -1) {
-            fprintf(stderr, "Thread %ld: (mmap) Error truncating file %s: %s\n",
-                    pthread_self(), filepath, strerror(errno));
-            close(fd);
-            continue;
-        }
+        if (ftruncate(fd, args->content_len) == -1) { close(fd); continue; }
 
-        void *map = mmap(NULL, content_len, PROT_WRITE, MAP_SHARED, fd, 0);
-        if (map == MAP_FAILED) {
-            fprintf(stderr, "Thread %ld: (mmap) Error mapping file %s: %s\n",
-                    pthread_self(), filepath, strerror(errno));
-            close(fd);
-            continue;
-        }
+        void *map = mmap(NULL, args->content_len, PROT_WRITE, MAP_SHARED, fd, 0);
+        if (map == MAP_FAILED) { close(fd); continue; }
 
-        memcpy(map, content, content_len);
-
-        munmap(map, content_len);
-
+        memcpy(map, args->content, args->content_len);
+        munmap(map, args->content_len);
         close(fd);
     }
     return NULL;
@@ -90,51 +106,51 @@ int main() {
     struct timespec start_time, end_time;
     clock_gettime(CLOCK_MONOTONIC, &start_time);
 
-    struct stat st;
-    int folder_exists = 0;
-    if (stat(FOLDER, &st) == -1) {
-        if (errno == ENOENT) {
-            printf("INFO: Folder does not exist. Creating '%s'...\n", FOLDER);
-            if (mkdir(FOLDER, 0755) == -1) {
-                perror("Fatal: Could not create directory");
-                return 1;
-            }
-        } else {
-            perror("Fatal: Could not stat directory");
-            return 1;
-        }
-    } else {
-        if (!S_ISDIR(st.st_mode)) {
-            fprintf(stderr, "Fatal: '%s' exists but is not a directory.\n", FOLDER);
-            return 1;
-        }
-        folder_exists = 1;
+    mkdir(FOLDER, 0755); 
+
+    int dir_fd = open(FOLDER, O_RDONLY | O_DIRECTORY);
+    if (dir_fd == -1) {
+        perror("Fatal: Could not open directory");
+        return 1;
     }
 
     void *(*worker_func)(void *);
-    if (folder_exists) {
-        printf("INFO: Folder exists. Using fast 'mmap' overwrite method.\n");
+    const char *content;
+    
+    char first_file_path[512];
+    snprintf(first_file_path, sizeof(first_file_path), "%s%s0%s", FOLDER, FILE_PREFIX, FILE_SUFFIX);
+    
+    if (faccessat(dir_fd, "file0.txt", F_OK, 0) == 0) {
+        printf("INFO: Files exist. Using 'mmap' + 'openat' overwrite method.\n");
         worker_func = overwrite_files_mmap_worker;
+        content = OVERWRITE_CONTENT;
     } else {
-        printf("INFO: Using standard 'write' method for initial creation.\n");
+        printf("INFO: Files do not exist. Using 'write' + 'openat' creation method.\n");
         worker_func = create_files_worker;
+        content = CREATE_CONTENT;
     }
+    const size_t content_len = strlen(content);
 
     pthread_t threads[NUM_THREADS];
     ThreadArgs args[NUM_THREADS];
     int files_per_thread = NUM_FILES / NUM_THREADS;
 
-    printf("Starting file creation with %d threads...\n", NUM_THREADS);
+    printf("Starting file operations with %d threads...\n", NUM_THREADS);
 
     for (int i = 0; i < NUM_THREADS; i++) {
         args[i].start_index = i * files_per_thread;
         args[i].end_index = (i == NUM_THREADS - 1) ? NUM_FILES : (i + 1) * files_per_thread;
+        args[i].dir_fd = dir_fd;
+        args[i].content = content;
+        args[i].content_len = content_len;
         pthread_create(&threads[i], NULL, worker_func, &args[i]);
     }
 
     for (int i = 0; i < NUM_THREADS; i++) {
         pthread_join(threads[i], NULL);
     }
+
+    close(dir_fd);
 
     clock_gettime(CLOCK_MONOTONIC, &end_time);
     double time_ms = (end_time.tv_sec - start_time.tv_sec) * 1000.0 +
