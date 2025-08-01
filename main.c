@@ -10,12 +10,7 @@
 #include <pthread.h>
 #include <stdlib.h>
 
-// For MAX performance, compile using Profile-Guided Optimization (PGO).
-// Step 1 (Instrument): gcc -O3 -fprofile-generate -o file_creator_instrumented file_creator.c -lpthread
-// Step 2 (Run):       ./file_creator_instrumented
-// Step 3 (Optimize):  gcc -O3 -fprofile-use -flto -march=native -o main main.c -lpthread
-
-#define NUM_FILES 1000
+#define NUM_FILES 10000
 #define NUM_THREADS 8
 #define FOLDER "modules/"
 #define FILE_PREFIX "file"

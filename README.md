@@ -25,6 +25,10 @@ gcc -O3 main.c -o main -pthread
 
 
 
+// For MAX performance, compile using Profile-Guided Optimization (PGO).
+// Step 1 (Instrument): gcc -O3 -fprofile-generate -o file_creator_instrumented file_creator.c -lpthread
+// Step 2 (Run):       ./file_creator_instrumented
+// Step 3 (Optimize):  gcc -O3 -fprofile-use -flto -march=native -o main main.c -lpthread
 
 
 
