@@ -4,5 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-rayon = "1.10.0"   # For parallel iterators
-memmap2 = "0.9.4"  # For memory-mapped files
+
+[build-dependencies]
+cc = "1.0"
