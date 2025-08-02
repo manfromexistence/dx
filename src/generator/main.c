@@ -3,13 +3,14 @@
 #include <string.h>
 #include <time.h>
 
-#ifdef _WIN32
+#if defined(_WIN32)
 #include <direct.h>
 #include <threads.h>
 #define MKDIR(path) _mkdir(path)
-#elif defined(MCU_PLATFORM)
-#include "mcu_threading.h"
-#include "mcu_flash.h"
+#elif defined(ESP32)
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_log.h"
 #else
 #include <pthread.h>
 #include <fcntl.h>
@@ -25,9 +26,8 @@
 #define FILE_PREFIX "file"
 #define FILE_SUFFIX ".txt"
 
-#ifdef _WIN32
+#if defined(_WIN32)
 #define CONTENT "Hello, Windows!"
-
 typedef struct {
     int start_index;
     int end_index;
@@ -36,16 +36,13 @@ typedef struct {
 int create_files_worker_portable(void* arg) {
     ThreadData_Portable *data = (ThreadData_Portable *)arg;
     char filepath[256];
-    
     for (int i = data->start_index; i < data->end_index; ++i) {
         snprintf(filepath, sizeof(filepath), "%s/%s%d%s", FOLDER, FILE_PREFIX, i, FILE_SUFFIX);
-        
         FILE *fp = fopen(filepath, "w");
         if (fp == NULL) {
             fprintf(stderr, "Error: Could not open file %s\n", filepath);
             continue;
         }
-        
         fputs(CONTENT, fp);
         fclose(fp);
     }
@@ -58,24 +55,23 @@ double get_monotonic_time() {
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1.0e9;
 }
 
-#elif defined(MCU_PLATFORM)
-#define MCU_CONTENT "Hello, MCU!"
-
+#elif defined(ESP32)
+#define MCU_CONTENT "Hello, ESP32!"
+static const char* TAG = "FILE_GEN";
 typedef struct {
     int start_index;
     int end_index;
 } ThreadData_MCU;
 
-void* create_blocks_worker_mcu(void* arg) {
+void create_blocks_worker_esp32(void* arg) {
     ThreadData_MCU* data = (ThreadData_MCU*)arg;
     for (int i = data->start_index; i < data->end_index; ++i) {
-        printf("MCU: Wrote '%s' to data block %d\n", MCU_CONTENT, i);
+        ESP_LOGI(TAG, "Wrote '%s' to data block %d", MCU_CONTENT, i);
     }
-    return NULL;
+    vTaskDelete(NULL);
 }
 
 #else
-
 #define CREATE_CONTENT "Files Created!\n"
 #define OVERWRITE_CONTENT "Files Overwritten!\n"
 
@@ -100,21 +96,16 @@ void *create_files_worker_posix(void *arg) {
     char filename[256];
     const size_t prefix_len = strlen(FILE_PREFIX);
     const size_t suffix_len = strlen(FILE_SUFFIX);
-    
     memcpy(filename, FILE_PREFIX, prefix_len);
     char *num_start_ptr = filename + prefix_len;
-    
     for (int i = args->start_index; i < args->end_index; i++) {
         char num_buf[12];
         char* num_str = fast_itoa(i, num_buf + sizeof(num_buf) - 1);
         size_t num_len = (num_buf + sizeof(num_buf) - 1) - num_str;
-        
         memcpy(num_start_ptr, num_str, num_len);
         memcpy(num_start_ptr + num_len, FILE_SUFFIX, suffix_len + 1);
-        
         int fd = openat(args->dir_fd, filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (fd == -1) continue;
-        
         write(fd, args->content, args->content_len);
         close(fd);
     }
@@ -126,27 +117,21 @@ void *overwrite_files_mmap_worker_posix(void *arg) {
     char filename[256];
     const size_t prefix_len = strlen(FILE_PREFIX);
     const size_t suffix_len = strlen(FILE_SUFFIX);
-
     memcpy(filename, FILE_PREFIX, prefix_len);
     char *num_start_ptr = filename + prefix_len;
-
     for (int i = args->start_index; i < args->end_index; i++) {
         char num_buf[12];
         char* num_str = fast_itoa(i, num_buf + sizeof(num_buf) - 1);
         size_t num_len = (num_buf + sizeof(num_buf) - 1) - num_str;
-
         memcpy(num_start_ptr, num_str, num_len);
         memcpy(num_start_ptr + num_len, FILE_SUFFIX, suffix_len + 1);
-
         int fd = openat(args->dir_fd, filename, O_RDWR);
         if (fd == -1) continue;
-
         void *map = mmap(NULL, args->content_len, PROT_WRITE, MAP_SHARED, fd, 0);
         if (map == MAP_FAILED) {
             close(fd);
             continue;
         }
-
         memcpy(map, args->content, args->content_len);
         munmap(map, args->content_len);
         close(fd);
@@ -156,7 +141,7 @@ void *overwrite_files_mmap_worker_posix(void *arg) {
 #endif
 
 int run_file_generator() {
-#ifdef _WIN32
+#if defined(_WIN32)
     if (MKDIR(FOLDER) != 0) {
         printf("Directory '%s' may already exist. Continuing...\n", FOLDER);
     } else {
@@ -164,47 +149,34 @@ int run_file_generator() {
     }
     printf("Running on Windows: Using portable C11 thread method.\n");
     double start_time = get_monotonic_time();
-
     thrd_t threads[NUM_THREADS];
     ThreadData_Portable thread_data_array[NUM_THREADS];
     int files_per_thread = NUM_FILES / NUM_THREADS;
-    
     for (int i = 0; i < NUM_THREADS; ++i) {
         thread_data_array[i].start_index = i * files_per_thread;
         thread_data_array[i].end_index = (i == NUM_THREADS - 1) ? NUM_FILES : (i + 1) * files_per_thread;
-        
         if (thrd_create(&threads[i], create_files_worker_portable, &thread_data_array[i]) != thrd_success) {
             fprintf(stderr, "Error: Failed to create thread %d.\n", i);
         }
     }
-
     for (int i = 0; i < NUM_THREADS; ++i) {
         thrd_join(threads[i], NULL);
     }
-    
     double end_time = get_monotonic_time();
     double time_ms = (end_time - start_time) * 1000.0;
-    
     printf("\nFinished creating %d files on Windows.\n", NUM_FILES);
     printf("Total time taken: %.2f ms\n", time_ms);
 
-#elif defined(MCU_PLATFORM)
-    printf("Running on MCU: Simulating data block creation.\n");
-    McuThread_t threads[NUM_THREADS];
+#elif defined(ESP32)
+    ESP_LOGI(TAG, "Running on ESP32: Simulating data block creation.");
     ThreadData_MCU thread_data_array[NUM_THREADS];
     int blocks_per_thread = NUM_FILES / NUM_THREADS;
-    
     for (int i = 0; i < NUM_THREADS; ++i) {
         thread_data_array[i].start_index = i * blocks_per_thread;
         thread_data_array[i].end_index = (i == NUM_THREADS - 1) ? NUM_FILES : (i + 1) * blocks_per_thread;
-        mcu_thread_create(&threads[i], create_blocks_worker_mcu, &thread_data_array[i]);
+        xTaskCreate(create_blocks_worker_esp32, "block_worker", 2048, &thread_data_array[i], 5, NULL);
     }
-
-    for (int i = 0; i < NUM_THREADS; ++i) {
-        mcu_thread_join(threads[i], NULL);
-    }
-
-    printf("\nFinished creating %d data blocks on MCU.\n", NUM_FILES);
+    ESP_LOGI(TAG, "\nFinished creating %d data blocks on ESP32.", NUM_FILES);
 
 #else
     if (MKDIR(FOLDER) != 0) {
@@ -212,54 +184,42 @@ int run_file_generator() {
     } else {
         printf("Directory '%s' created successfully.\n", FOLDER);
     }
-    printf("Running on POSIX: Using high-performance methods.\n");
+    printf("Running on POSIX / WebAssembly: Using high-performance methods.\n");
     struct timespec start_time, end_time;
     clock_gettime(CLOCK_MONOTONIC, &start_time);
-
     int dir_fd = open(FOLDER, O_RDONLY | O_DIRECTORY);
     if (dir_fd == -1) {
         perror("Fatal: Could not open directory " FOLDER);
         return 1;
     }
-
     void *(*worker_func)(void *);
     const char *content_to_write;
     const char *action_description;
-
     const size_t create_len = strlen(CREATE_CONTENT);
     const size_t overwrite_len = strlen(OVERWRITE_CONTENT);
     const size_t max_len = (create_len > overwrite_len) ? create_len : overwrite_len;
-
     char padded_create_content[max_len + 1];
     char padded_overwrite_content[max_len + 1];
-
     memcpy(padded_create_content, CREATE_CONTENT, create_len);
     memset(padded_create_content + create_len, ' ', max_len - create_len);
     padded_create_content[max_len] = '\0';
-    
     memcpy(padded_overwrite_content, OVERWRITE_CONTENT, overwrite_len);
     memset(padded_overwrite_content + overwrite_len, ' ', max_len - overwrite_len);
     padded_overwrite_content[max_len] = '\0';
-
     char first_filename[64];
     snprintf(first_filename, sizeof(first_filename), "%s0%s", FILE_PREFIX, FILE_SUFFIX);
-    
     if (faccessat(dir_fd, first_filename, F_OK, 0) == 0) {
-        printf("INFO: Files exist. Using 'mmap' overwrite method.\n");
         worker_func = overwrite_files_mmap_worker_posix;
         content_to_write = padded_overwrite_content;
         action_description = "overwriting";
     } else {
-        printf("INFO: Files do not exist. Using 'write' creation method.\n");
         worker_func = create_files_worker_posix;
         content_to_write = padded_create_content;
         action_description = "creating";
     }
-
     pthread_t threads[NUM_THREADS];
     ThreadArgs_POSIX args[NUM_THREADS];
     int files_per_thread = NUM_FILES / NUM_THREADS;
-
     for (int i = 0; i < NUM_THREADS; i++) {
         args[i].start_index = i * files_per_thread;
         args[i].end_index = (i == NUM_THREADS - 1) ? NUM_FILES : (i + 1) * files_per_thread;
@@ -268,16 +228,12 @@ int run_file_generator() {
         args[i].content_len = max_len;
         pthread_create(&threads[i], NULL, worker_func, &args[i]);
     }
-
     for (int i = 0; i < NUM_THREADS; i++) {
         pthread_join(threads[i], NULL);
     }
-
     close(dir_fd);
-
     clock_gettime(CLOCK_MONOTONIC, &end_time);
     double time_ms = (end_time.tv_sec - start_time.tv_sec) * 1000.0 + (end_time.tv_nsec - start_time.tv_nsec) / 1000000.0;
-    
     printf("\nFinished %s %d files.\n", action_description, NUM_FILES);
     printf("Total time taken: %.2f ms\n", time_ms);
 #endif
