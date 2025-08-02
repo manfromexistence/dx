@@ -4,20 +4,29 @@
 #include <time.h>
 
 #if defined(_WIN32)
-#include <direct.h>
-#include <threads.h>
-#define MKDIR(path) _mkdir(path)
-#elif defined(ESP32)
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_log.h"
+    #define DX_PLATFORM_STANDARD
+#elif defined(__unix__) || defined(__APPLE__)
+    #define DX_PLATFORM_POSIX
 #else
-#include <pthread.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <sys/stat.h>
-#include <sys/mman.h>
-#define MKDIR(path) mkdir(path, 0755)
+    #define DX_PLATFORM_STANDARD
+#endif
+
+#if defined(DX_PLATFORM_STANDARD)
+    #if defined(_WIN32)
+        #include <direct.h>
+        #define MKDIR(path) _mkdir(path)
+    #else
+        #include <sys/stat.h>
+        #define MKDIR(path) mkdir(path, 0755)
+    #endif
+    #include <threads.h>
+#elif defined(DX_PLATFORM_POSIX)
+    #include <pthread.h>
+    #include <fcntl.h>
+    #include <unistd.h>
+    #include <sys/stat.h>
+    #include <sys/mman.h>
+    #define MKDIR(path) mkdir(path, 0755)
 #endif
 
 #define NUM_FILES 10000
@@ -26,15 +35,15 @@
 #define FILE_PREFIX "file"
 #define FILE_SUFFIX ".txt"
 
-#if defined(_WIN32)
-#define CONTENT "Hello, Windows!"
+#if defined(DX_PLATFORM_STANDARD)
+#define CONTENT "Hello, Standard C I/O!"
 typedef struct {
     int start_index;
     int end_index;
-} ThreadData_Portable;
+} ThreadData_Standard;
 
-int create_files_worker_portable(void* arg) {
-    ThreadData_Portable *data = (ThreadData_Portable *)arg;
+int create_files_worker_standard(void* arg) {
+    ThreadData_Standard *data = (ThreadData_Standard *)arg;
     char filepath[256];
     for (int i = data->start_index; i < data->end_index; ++i) {
         snprintf(filepath, sizeof(filepath), "%s/%s%d%s", FOLDER, FILE_PREFIX, i, FILE_SUFFIX);
@@ -55,23 +64,7 @@ double get_monotonic_time() {
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1.0e9;
 }
 
-#elif defined(ESP32)
-#define MCU_CONTENT "Hello, ESP32!"
-static const char* TAG = "FILE_GEN";
-typedef struct {
-    int start_index;
-    int end_index;
-} ThreadData_MCU;
-
-void create_blocks_worker_esp32(void* arg) {
-    ThreadData_MCU* data = (ThreadData_MCU*)arg;
-    for (int i = data->start_index; i < data->end_index; ++i) {
-        ESP_LOGI(TAG, "Wrote '%s' to data block %d", MCU_CONTENT, i);
-    }
-    vTaskDelete(NULL);
-}
-
-#else
+#elif defined(DX_PLATFORM_POSIX)
 #define CREATE_CONTENT "Files Created!\n"
 #define OVERWRITE_CONTENT "Files Overwritten!\n"
 
@@ -141,50 +134,48 @@ void *overwrite_files_mmap_worker_posix(void *arg) {
 #endif
 
 int run_file_generator() {
-#if defined(_WIN32)
+#if defined(DX_PLATFORM_STANDARD)
     if (MKDIR(FOLDER) != 0) {
         printf("Directory '%s' may already exist. Continuing...\n", FOLDER);
     } else {
         printf("Directory '%s' created successfully.\n", FOLDER);
     }
-    printf("Running on Windows: Using portable C11 thread method.\n");
+
+    #if defined(_WIN32)
+        printf("Running on Windows: Using standard C11 I/O method.\n");
+    #else
+        printf("Running on an unrecognized OS: Using generic standard C11 I/O fallback.\n");
+    #endif
+
     double start_time = get_monotonic_time();
     thrd_t threads[NUM_THREADS];
-    ThreadData_Portable thread_data_array[NUM_THREADS];
+    ThreadData_Standard thread_data_array[NUM_THREADS];
     int files_per_thread = NUM_FILES / NUM_THREADS;
+
     for (int i = 0; i < NUM_THREADS; ++i) {
         thread_data_array[i].start_index = i * files_per_thread;
         thread_data_array[i].end_index = (i == NUM_THREADS - 1) ? NUM_FILES : (i + 1) * files_per_thread;
-        if (thrd_create(&threads[i], create_files_worker_portable, &thread_data_array[i]) != thrd_success) {
+        if (thrd_create(&threads[i], create_files_worker_standard, &thread_data_array[i]) != thrd_success) {
             fprintf(stderr, "Error: Failed to create thread %d.\n", i);
         }
     }
+
     for (int i = 0; i < NUM_THREADS; ++i) {
         thrd_join(threads[i], NULL);
     }
+
     double end_time = get_monotonic_time();
     double time_ms = (end_time - start_time) * 1000.0;
-    printf("\nFinished creating %d files on Windows.\n", NUM_FILES);
+    printf("\nFinished creating %d files.\n", NUM_FILES);
     printf("Total time taken: %.2f ms\n", time_ms);
 
-#elif defined(ESP32)
-    ESP_LOGI(TAG, "Running on ESP32: Simulating data block creation.");
-    ThreadData_MCU thread_data_array[NUM_THREADS];
-    int blocks_per_thread = NUM_FILES / NUM_THREADS;
-    for (int i = 0; i < NUM_THREADS; ++i) {
-        thread_data_array[i].start_index = i * blocks_per_thread;
-        thread_data_array[i].end_index = (i == NUM_THREADS - 1) ? NUM_FILES : (i + 1) * blocks_per_thread;
-        xTaskCreate(create_blocks_worker_esp32, "block_worker", 2048, &thread_data_array[i], 5, NULL);
-    }
-    ESP_LOGI(TAG, "\nFinished creating %d data blocks on ESP32.", NUM_FILES);
-
-#else
+#elif defined(DX_PLATFORM_POSIX)
     if (MKDIR(FOLDER) != 0) {
         printf("Directory '%s' may already exist. Continuing...\n", FOLDER);
     } else {
         printf("Directory '%s' created successfully.\n", FOLDER);
     }
-    printf("Running on POSIX / WebAssembly: Using high-performance methods.\n");
+    printf("Running on POSIX: Using high-performance mmap/openat methods.\n");
     struct timespec start_time, end_time;
     clock_gettime(CLOCK_MONOTONIC, &start_time);
     int dir_fd = open(FOLDER, O_RDONLY | O_DIRECTORY);
