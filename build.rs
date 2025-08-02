@@ -1,8 +1,8 @@
 fn main() {
-    println!("cargo:rerun-if-changed=src/generator/main.c");
+    println!("cargo:rerun-if-changed=c/main.c");
 
     cc::Build::new()
-        .file("src/generator/main.c")
+        .file("c/main.c")
         .compile("generator");
     println!("cargo:rustc-link-lib=pthread");
 }
