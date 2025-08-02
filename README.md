@@ -389,3 +389,229 @@ fn main() -> Result<()> {
     Ok(())
 }
 ```
+
+### Dx Styles
+```
+use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::Path;
+use std::sync::mpsc::channel;
+use std::time::{Duration, Instant};
+use swc_common::{
+    errors::{Handler},
+    source_map::SourceMap,
+    sync::Lrc,
+    FileName,
+    input::StringInput,
+};
+use swc_ecma_parser::{lexer::Lexer, Parser, Syntax, TsSyntax};
+use swc_ecma_visit::{Visit, VisitWith};
+use swc_ecma_ast;
+
+unsafe extern "C" {
+    fn run_file_generator(indices: *const i32, num_files: i32) -> i32;
+}
+
+// Visitor to extract className attributes from JSX
+struct ClassNameVisitor {
+    classes: Vec<String>,
+}
+
+impl ClassNameVisitor {
+    fn new() -> Self {
+        ClassNameVisitor { classes: Vec::new() }
+    }
+}
+
+impl Visit for ClassNameVisitor {
+    fn visit_jsx_opening_element(&mut self, n: &swc_ecma_ast::JSXOpeningElement) {
+        for attr in &n.attrs {
+            if let swc_ecma_ast::JSXAttrOrSpread::JSXAttr(attr) = attr {
+                if let swc_ecma_ast::JSXAttrName::Ident(ident) = &attr.name {
+                    if ident.sym.as_ref() == "className" {
+                        if let Some(swc_ecma_ast::JSXAttrValue::Lit(lit)) = &attr.value {
+                            if let swc_ecma_ast::Lit::Str(s) = lit {
+                                // Split className string into individual classes
+                                self.classes
+                                    .extend(s.value.split_whitespace().map(|s| s.to_string()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Map Tailwind-like classes to CSS rules
+fn class_to_css(class: &str) -> Option<String> {
+    match class {
+        "flex" => Some(format!(".{} {{ display: flex; }}", class)),
+        // Add more Tailwind-like mappings here
+        _ => None,
+    }
+}
+
+// Update global.css with new CSS rules
+fn update_global_css(classes: Vec<String>) -> std::io::Result<()> {
+    let css_path = "styles/global.css";
+    fs::create_dir_all("styles")?;
+
+    // Collect unique CSS rules
+    let mut css_rules = Vec::new();
+    for class in classes {
+        if let Some(rule) = class_to_css(&class) {
+            if !css_rules.contains(&rule) {
+                css_rules.push(rule);
+            }
+        }
+    }
+
+    // Write to global.css
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(css_path)?;
+    for rule in css_rules {
+        writeln!(file, "{}", rule)?;
+    }
+    Ok(())
+}
+
+fn main() -> std::io::Result<()> {
+    println!("🦀 Rust Observer: Initiating C file generator for 10000 files...");
+
+    // Run the original file generator
+    let indices: Vec<i32> = (0..10000).collect();
+    let num_files = indices.len() as i32;
+    let start_time = Instant::now();
+    let status_code = unsafe { run_file_generator(indices.as_ptr(), num_files) };
+    let duration = start_time.elapsed();
+
+    if status_code == 0 {
+        println!("🦀 Rust Observer: C generator finished successfully.");
+        println!("🕒 Time taken for FFI operation: {:.2?}", duration);
+        println!("\nMission Accomplished: Development experience enhanced!");
+    } else {
+        eprintln!(
+            "🔥 Rust Observer: C generator reported an error (status code: {})!",
+            status_code
+        );
+    }
+
+    // Set up file watcher for .tsx files
+    println!("🦀 Rust Observer: Starting file watcher for .tsx files...");
+    let (tx, rx) = channel();
+    let mut watcher = match RecommendedWatcher::new(
+        tx,
+        Config::default().with_poll_interval(Duration::from_millis(100)),
+    ) {
+        Ok(watcher) => watcher,
+        Err(e) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to create watcher: {}", e),
+            ));
+        }
+    };
+
+    // Explicitly handle notify::Result without ?
+    match watcher.watch(Path::new("test"), RecursiveMode::Recursive) {
+        Ok(_) => (),
+        Err(e) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Watcher error: {}", e),
+            ));
+        }
+    }
+
+    // SWC setup
+    let cm: Lrc<SourceMap> = Default::default();
+    let handler = Handler::with_emitter_writer(
+        Box::new(std::io::stderr()),
+        Some(cm.clone()),
+        // false,
+        // ColorConfig::Auto,
+    );
+
+    // Watch loop
+    for res in rx {
+        match res {
+            Ok(event) => {
+                for path in event.paths {
+                    if path.extension().and_then(|s| s.to_str()) == Some("tsx") {
+                        println!("🦀 Detected change in: {:?}", path);
+
+                        // Read and parse .tsx file
+                        let content = match fs::read_to_string(&path) {
+                            Ok(content) => content,
+                            Err(e) => {
+                                eprintln!("Error reading file {:?}: {}", path, e);
+                                continue;
+                            }
+                        };
+
+                        let fm = cm.new_source_file(
+                            FileName::Custom(path.to_string_lossy().into()).into(),
+                            content,
+                        );
+                        let lexer = Lexer::new(
+                            Syntax::Typescript(TsSyntax {
+                                tsx: true,
+                                decorators: false,
+                                dts: false,
+                                no_early_errors: false,
+                                disallow_ambiguous_jsx_like: false,
+                            }),
+                            Default::default(),
+                            StringInput::from(&*fm),
+                            None,
+                        );
+                        let mut parser = Parser::new_from(lexer);
+                        let module = match parser.parse_module() {
+                            Ok(module) => module,
+                            Err(e) => {
+                                e.into_diagnostic(&handler).emit();
+                                continue;
+                            }
+                        };
+
+                        // Extract class names
+                        let mut visitor = ClassNameVisitor::new();
+                        module.visit_with(&mut visitor);
+                        if !visitor.classes.is_empty() {
+                            println!("🦀 Found classes: {:?}", visitor.classes);
+                            if let Err(e) = update_global_css(visitor.classes) {
+                                eprintln!("Error updating global.css: {}", e);
+                            } else {
+                                println!("🦀 Updated styles/global.css");
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => eprintln!("Watcher error: {:?}", e),
+        }
+    }
+
+    Ok(())
+}
+```
+
+[package]
+name = "dx"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+notify = "8.1.0"
+swc_common = "14.0.2"
+swc_ecma_ast = "14.0.0"
+swc_ecma_parser = "22.0.3"
+swc_ecma_visit = "14.0.0"
+
+[build-dependencies]
+cc = "1.0"
