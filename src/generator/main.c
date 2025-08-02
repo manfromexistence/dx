@@ -3,10 +3,9 @@
 #include <string.h>
 #include <time.h>
 
-// Platform-specific includes and definitions
 #ifdef _WIN32
 #include <direct.h>
-#include <threads.h> // Use C11 threads on Windows for portability
+#include <threads.h>
 #define MKDIR(path) _mkdir(path)
 #else
 #include <pthread.h>
@@ -17,14 +16,11 @@
 #define MKDIR(path) mkdir(path, 0755)
 #endif
 
-// Common definitions
 #define NUM_FILES 10000
 #define NUM_THREADS 8
 #define FOLDER "modules"
 #define FILE_PREFIX "file"
 #define FILE_SUFFIX ".txt"
-
-// --- Portable/Windows Implementation ---
 
 #ifdef _WIN32
 #define CONTENT "Hello, Windows!"
@@ -34,14 +30,11 @@ typedef struct {
     int end_index;
 } ThreadData_Portable;
 
-// Portable file creation worker (used on Windows)
-// This is the function from your first code example
 int create_files_worker_portable(void* arg) {
     ThreadData_Portable *data = (ThreadData_Portable *)arg;
     char filepath[256];
     
     for (int i = data->start_index; i < data->end_index; ++i) {
-        // Note the portable path separator for snprintf
         snprintf(filepath, sizeof(filepath), "%s/%s%d%s", FOLDER, FILE_PREFIX, i, FILE_SUFFIX);
         
         FILE *fp = fopen(filepath, "w");
@@ -56,7 +49,6 @@ int create_files_worker_portable(void* arg) {
     return 0;
 }
 
-// Portable timing function
 double get_monotonic_time() {
     struct timespec ts;
     timespec_get(&ts, TIME_UTC);
@@ -64,7 +56,6 @@ double get_monotonic_time() {
 }
 
 #else
-// --- High-Performance POSIX Implementation ---
 
 #define CREATE_CONTENT "Files Created!\n"
 #define OVERWRITE_CONTENT "Files Overwritten!\n"
@@ -77,7 +68,6 @@ typedef struct {
     size_t content_len;
 } ThreadArgs_POSIX;
 
-// Helper function for fast integer to string conversion
 static inline char* fast_itoa(int value, char* buffer_end) {
     *buffer_end = '\0';
     char* p = buffer_end;
@@ -86,7 +76,6 @@ static inline char* fast_itoa(int value, char* buffer_end) {
     return p;
 }
 
-// POSIX worker for creating new files
 void *create_files_worker_posix(void *arg) {
     ThreadArgs_POSIX *args = (ThreadArgs_POSIX *)arg;
     char filename[256];
@@ -113,7 +102,6 @@ void *create_files_worker_posix(void *arg) {
     return NULL;
 }
 
-// POSIX worker for overwriting files with mmap (UNCHANGED as requested)
 void *overwrite_files_mmap_worker_posix(void *arg) {
     ThreadArgs_POSIX *args = (ThreadArgs_POSIX *)arg;
     char filename[256];
@@ -148,10 +136,7 @@ void *overwrite_files_mmap_worker_posix(void *arg) {
 }
 #endif
 
-// --- Main Program Logic ---
-
 int run_file_generator() {
-    // Step 1: Create directory (portable)
     if (MKDIR(FOLDER) != 0) {
         printf("Directory '%s' may already exist. Continuing...\n", FOLDER);
     } else {
@@ -159,7 +144,6 @@ int run_file_generator() {
     }
 
 #ifdef _WIN32
-    // --- Windows Main Logic (using C11 Threads and Portable Worker) ---
     printf("Running on Windows: Using portable C11 thread method.\n");
     double start_time = get_monotonic_time();
 
@@ -187,7 +171,6 @@ int run_file_generator() {
     printf("Total time taken: %.2f ms\n", time_ms);
 
 #else
-    // --- POSIX Main Logic (using pthreads and High-Performance Workers) ---
     printf("Running on POSIX: Using high-performance methods.\n");
     struct timespec start_time, end_time;
     clock_gettime(CLOCK_MONOTONIC, &start_time);
