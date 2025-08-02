@@ -7,7 +7,6 @@ unsafe extern "C" {
 fn main() {
     println!("🦀 Rust Observer: Initiating C file generator for 10000 files...");
 
-    // Generate indices 0 to 9999 for 10,000 files
     let indices: Vec<i32> = (0..10000).collect();
     let num_files = indices.len() as i32;
 
