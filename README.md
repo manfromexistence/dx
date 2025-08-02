@@ -317,5 +317,75 @@ int main()
 
     return 0;
 }
+```
 
+
+### Rust with Rayon
+```
+// To run this code, you need to add `rayon` to your dependencies in Cargo.toml.
+//
+// [dependencies]
+// rayon = "1.10.0"
+
+use rayon::prelude::*;
+use std::fs;
+use std::path::Path;
+use std::time::Instant;
+use std::io::Result;
+
+// --- Configuration ---
+const NUM_FILES: u32 = 10_000;
+const FOLDER_NAME: &str = "modules";
+// -------------------
+
+fn main() -> Result<()> {
+    println!("Preparing to process {} files...", NUM_FILES);
+
+    // Start the timer to measure the entire operation.
+    let start_time = Instant::now();
+
+    // Determine the message based on whether the directory already exists.
+    let message_on_creation = if Path::new(FOLDER_NAME).exists() {
+        "Files overwritten"
+    } else {
+        "Files created"
+    };
+
+    // Create the directory if it doesn't exist. `create_dir_all` is idempotent,
+    // meaning it won't error if the directory is already there.
+    fs::create_dir_all(FOLDER_NAME)?;
+    println!("Directory '{}' is ready.", FOLDER_NAME);
+
+    // This is where the magic happens. We create a range of numbers from 0 to NUM_FILES,
+    // and `into_par_iter()` from the Rayon crate turns it into a parallel iterator.
+    // Rayon's thread pool will automatically distribute the work of this loop
+    // across multiple CPU cores.
+    (0..NUM_FILES).into_par_iter().for_each(|i| {
+        // Construct the full path for the new file.
+        let file_path = format!("{}/file_{}.txt", FOLDER_NAME, i);
+
+        // Define the content to be written to the file.
+        let content = format!("{}\nThis is file number {}.", message_on_creation, i);
+
+        // Write the content to the file. `fs::write` is a convenient function
+        // that handles opening, writing, and closing the file.
+        // We use `unwrap()` here for simplicity in the parallel loop. In a more
+        // complex application, you might use `try_for_each` to handle errors.
+        fs::write(&file_path, content)
+            .unwrap_or_else(|e| eprintln!("Failed to write to {}: {}", file_path, e));
+    });
+
+    // Stop the timer.
+    let duration = start_time.elapsed();
+
+    // Report the results.
+    println!("\n----------------------------------------");
+    println!("Success!");
+    println!("Action: {}", message_on_creation);
+    println!("Files processed: {}", NUM_FILES);
+    println!("Time taken: {} ms", duration.as_millis());
+    println!("----------------------------------------");
+
+    Ok(())
+}
 ```
