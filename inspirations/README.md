@@ -1,4 +1,8 @@
 # Inspirations
+
+charasay  create-better-t-stack  file_creator_instrumented                    footer  header   main    main.s    README.md  term_size-rs  tree_2.2.1.orig.tar.gz
+clack     figlet-fonts           file_creator_instrumented-file_creator.gcda  git     lolcrab  main.c  platform  rs-figlet  tree-2.2.1
+
 ```
 git clone https://github.com/torvalds/linux && cd linux && rm -rf .git && cd ..
 
