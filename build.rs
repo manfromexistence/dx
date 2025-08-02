@@ -6,3 +6,4 @@ fn main() {
         .compile("generator");
     println!("cargo:rustc-link-lib=pthread");
 }
+

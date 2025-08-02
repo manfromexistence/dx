@@ -29,8 +29,6 @@
     #define MKDIR(path) mkdir(path, 0755)
 #endif
 
-#define NUM_FILES 10000
-#define NUM_THREADS 8
 #define FOLDER "modules"
 #define FILE_PREFIX "file"
 #define FILE_SUFFIX ".txt"
@@ -38,15 +36,16 @@
 #if defined(DX_PLATFORM_STANDARD)
 #define CONTENT "Hello, Standard C I/O!"
 typedef struct {
-    int start_index;
-    int end_index;
+    const int *indices;
+    int start;
+    int end;
 } ThreadData_Standard;
 
 int create_files_worker_standard(void* arg) {
     ThreadData_Standard *data = (ThreadData_Standard *)arg;
     char filepath[256];
-    for (int i = data->start_index; i < data->end_index; ++i) {
-        snprintf(filepath, sizeof(filepath), "%s/%s%d%s", FOLDER, FILE_PREFIX, i, FILE_SUFFIX);
+    for (int i = data->start; i < data->end; ++i) {
+        snprintf(filepath, sizeof(filepath), "%s/%s%d%s", FOLDER, FILE_PREFIX, data->indices[i], FILE_SUFFIX);
         FILE *fp = fopen(filepath, "w");
         if (fp == NULL) {
             fprintf(stderr, "Error: Could not open file %s\n", filepath);
@@ -69,8 +68,9 @@ double get_monotonic_time() {
 #define OVERWRITE_CONTENT "Files Overwritten!\n"
 
 typedef struct {
-    int start_index;
-    int end_index;
+    const int *indices;
+    int start;
+    int end;
     int dir_fd;
     const char *content;
     size_t content_len;
@@ -91,9 +91,9 @@ void *create_files_worker_posix(void *arg) {
     const size_t suffix_len = strlen(FILE_SUFFIX);
     memcpy(filename, FILE_PREFIX, prefix_len);
     char *num_start_ptr = filename + prefix_len;
-    for (int i = args->start_index; i < args->end_index; i++) {
+    for (int i = args->start; i < args->end; i++) {
         char num_buf[12];
-        char* num_str = fast_itoa(i, num_buf + sizeof(num_buf) - 1);
+        char* num_str = fast_itoa(args->indices[i], num_buf + sizeof(num_buf) - 1);
         size_t num_len = (num_buf + sizeof(num_buf) - 1) - num_str;
         memcpy(num_start_ptr, num_str, num_len);
         memcpy(num_start_ptr + num_len, FILE_SUFFIX, suffix_len + 1);
@@ -112,9 +112,9 @@ void *overwrite_files_mmap_worker_posix(void *arg) {
     const size_t suffix_len = strlen(FILE_SUFFIX);
     memcpy(filename, FILE_PREFIX, prefix_len);
     char *num_start_ptr = filename + prefix_len;
-    for (int i = args->start_index; i < args->end_index; i++) {
+    for (int i = args->start; i < args->end; i++) {
         char num_buf[12];
-        char* num_str = fast_itoa(i, num_buf + sizeof(num_buf) - 1);
+        char* num_str = fast_itoa(args->indices[i], num_buf + sizeof(num_buf) - 1);
         size_t num_len = (num_buf + sizeof(num_buf) - 1) - num_str;
         memcpy(num_start_ptr, num_str, num_len);
         memcpy(num_start_ptr + num_len, FILE_SUFFIX, suffix_len + 1);
@@ -133,7 +133,13 @@ void *overwrite_files_mmap_worker_posix(void *arg) {
 }
 #endif
 
-int run_file_generator() {
+int run_file_generator(const int *indices, int num_files) {
+    if (num_files <= 0) {
+        printf("No files to create.\n");
+        return 0;
+    }
+
+    #define NUM_THREADS 8
 #if defined(DX_PLATFORM_STANDARD)
     if (MKDIR(FOLDER) != 0) {
         printf("Directory '%s' may already exist. Continuing...\n", FOLDER);
@@ -150,11 +156,12 @@ int run_file_generator() {
     double start_time = get_monotonic_time();
     thrd_t threads[NUM_THREADS];
     ThreadData_Standard thread_data_array[NUM_THREADS];
-    int files_per_thread = NUM_FILES / NUM_THREADS;
+    int files_per_thread = num_files / NUM_THREADS;
 
     for (int i = 0; i < NUM_THREADS; ++i) {
-        thread_data_array[i].start_index = i * files_per_thread;
-        thread_data_array[i].end_index = (i == NUM_THREADS - 1) ? NUM_FILES : (i + 1) * files_per_thread;
+        thread_data_array[i].indices = indices;
+        thread_data_array[i].start = i * files_per_thread;
+        thread_data_array[i].end = (i == NUM_THREADS - 1) ? num_files : (i + 1) * files_per_thread;
         if (thrd_create(&threads[i], create_files_worker_standard, &thread_data_array[i]) != thrd_success) {
             fprintf(stderr, "Error: Failed to create thread %d.\n", i);
         }
@@ -166,7 +173,7 @@ int run_file_generator() {
 
     double end_time = get_monotonic_time();
     double time_ms = (end_time - start_time) * 1000.0;
-    printf("\nFinished creating %d files.\n", NUM_FILES);
+    printf("\nFinished creating %d files.\n", num_files);
     printf("Total time taken: %.2f ms\n", time_ms);
 
 #elif defined(DX_PLATFORM_POSIX)
@@ -198,7 +205,7 @@ int run_file_generator() {
     memset(padded_overwrite_content + overwrite_len, ' ', max_len - overwrite_len);
     padded_overwrite_content[max_len] = '\0';
     char first_filename[64];
-    snprintf(first_filename, sizeof(first_filename), "%s0%s", FILE_PREFIX, FILE_SUFFIX);
+    snprintf(first_filename, sizeof(first_filename), "%s%d%s", FILE_PREFIX, indices[0], FILE_SUFFIX);
     if (faccessat(dir_fd, first_filename, F_OK, 0) == 0) {
         worker_func = overwrite_files_mmap_worker_posix;
         content_to_write = padded_overwrite_content;
@@ -210,10 +217,11 @@ int run_file_generator() {
     }
     pthread_t threads[NUM_THREADS];
     ThreadArgs_POSIX args[NUM_THREADS];
-    int files_per_thread = NUM_FILES / NUM_THREADS;
+    int files_per_thread = num_files / NUM_THREADS;
     for (int i = 0; i < NUM_THREADS; i++) {
-        args[i].start_index = i * files_per_thread;
-        args[i].end_index = (i == NUM_THREADS - 1) ? NUM_FILES : (i + 1) * files_per_thread;
+        args[i].indices = indices;
+        args[i].start = i * files_per_thread;
+        args[i].end = (i == NUM_THREADS - 1) ? num_files : (i + 1) * files_per_thread;
         args[i].dir_fd = dir_fd;
         args[i].content = content_to_write;
         args[i].content_len = max_len;
@@ -225,7 +233,7 @@ int run_file_generator() {
     close(dir_fd);
     clock_gettime(CLOCK_MONOTONIC, &end_time);
     double time_ms = (end_time.tv_sec - start_time.tv_sec) * 1000.0 + (end_time.tv_nsec - start_time.tv_nsec) / 1000000.0;
-    printf("\nFinished %s %d files.\n", action_description, NUM_FILES);
+    printf("\nFinished %s %d files.\n", action_description, num_files);
     printf("Total time taken: %.2f ms\n", time_ms);
 #endif
 
