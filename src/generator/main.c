@@ -7,6 +7,9 @@
 #include <direct.h>
 #include <threads.h>
 #define MKDIR(path) _mkdir(path)
+#elif defined(MCU_PLATFORM)
+#include "mcu_threading.h"
+#include "mcu_flash.h"
 #else
 #include <pthread.h>
 #include <fcntl.h>
@@ -53,6 +56,22 @@ double get_monotonic_time() {
     struct timespec ts;
     timespec_get(&ts, TIME_UTC);
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1.0e9;
+}
+
+#elif defined(MCU_PLATFORM)
+#define MCU_CONTENT "Hello, MCU!"
+
+typedef struct {
+    int start_index;
+    int end_index;
+} ThreadData_MCU;
+
+void* create_blocks_worker_mcu(void* arg) {
+    ThreadData_MCU* data = (ThreadData_MCU*)arg;
+    for (int i = data->start_index; i < data->end_index; ++i) {
+        printf("MCU: Wrote '%s' to data block %d\n", MCU_CONTENT, i);
+    }
+    return NULL;
 }
 
 #else
@@ -137,13 +156,12 @@ void *overwrite_files_mmap_worker_posix(void *arg) {
 #endif
 
 int run_file_generator() {
+#ifdef _WIN32
     if (MKDIR(FOLDER) != 0) {
         printf("Directory '%s' may already exist. Continuing...\n", FOLDER);
     } else {
         printf("Directory '%s' created successfully.\n", FOLDER);
     }
-
-#ifdef _WIN32
     printf("Running on Windows: Using portable C11 thread method.\n");
     double start_time = get_monotonic_time();
 
@@ -170,7 +188,30 @@ int run_file_generator() {
     printf("\nFinished creating %d files on Windows.\n", NUM_FILES);
     printf("Total time taken: %.2f ms\n", time_ms);
 
+#elif defined(MCU_PLATFORM)
+    printf("Running on MCU: Simulating data block creation.\n");
+    McuThread_t threads[NUM_THREADS];
+    ThreadData_MCU thread_data_array[NUM_THREADS];
+    int blocks_per_thread = NUM_FILES / NUM_THREADS;
+    
+    for (int i = 0; i < NUM_THREADS; ++i) {
+        thread_data_array[i].start_index = i * blocks_per_thread;
+        thread_data_array[i].end_index = (i == NUM_THREADS - 1) ? NUM_FILES : (i + 1) * blocks_per_thread;
+        mcu_thread_create(&threads[i], create_blocks_worker_mcu, &thread_data_array[i]);
+    }
+
+    for (int i = 0; i < NUM_THREADS; ++i) {
+        mcu_thread_join(threads[i], NULL);
+    }
+
+    printf("\nFinished creating %d data blocks on MCU.\n", NUM_FILES);
+
 #else
+    if (MKDIR(FOLDER) != 0) {
+        printf("Directory '%s' may already exist. Continuing...\n", FOLDER);
+    } else {
+        printf("Directory '%s' created successfully.\n", FOLDER);
+    }
     printf("Running on POSIX: Using high-performance methods.\n");
     struct timespec start_time, end_time;
     clock_gettime(CLOCK_MONOTONIC, &start_time);
